@@ -1,0 +1,21 @@
+# Node modules
+node_modules/
+client/node_modules/
+server/node_modules/
+
+# Production build outputs
+client/dist/
+
+# Environment and log files
+.env
+*.log
+npm-debug.log*
+
+# Database & temp files
+*.sqlite
+*.tar.gz
+
+# OS / IDE metadata
+.DS_Store
+.vscode/
+.idea/

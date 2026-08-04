@@ -1,0 +1,13 @@
+{
+  "name": "lopez-arq-fullstack",
+  "version": "1.0.0",
+  "description": "Sistema de gestión de horas, obras y costos para Lopez Arq",
+  "main": "server/server.js",
+  "scripts": {
+    "build": "cd client && npm install && npm run build && cd ../server && npm install",
+    "start": "cd server && node server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

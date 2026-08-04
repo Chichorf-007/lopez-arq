@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: lopez-arq
+    env: node
+    buildCommand: npm run build
+    startCommand: npm start
+    envVars:
+      - key: SUPABASE_URL
+        value: https://fxdcgicxyasrboovmbwm.supabase.co
+      - key: SUPABASE_KEY
+        value: sb_publishable_f_BqO47yu0_5focPXBl7SA_ojpat60d
+      - key: JWT_SECRET
+        value: lopez_arq_secret_key_2026_guaranies
