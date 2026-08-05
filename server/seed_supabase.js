@@ -6,19 +6,21 @@ const SUPABASE_KEY = process.env.SUPABASE_KEY || 'sb_publishable_f_BqO47yu0_5foc
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-async function initDatabase() {
-  console.log('🔄 Verificando tablas e inicializando datos por defecto en Supabase...');
+async function seed() {
+  console.log('🌱 Sembrando usuarios reales y proyectos en Supabase...');
 
   try {
     const adminHash = await bcrypt.hash('admin123', 10);
-
-    // Upsert admin maru.lopez
+    
+    // Seed admin accounts (both maru.lopez and maru for convenience)
     await supabase.from('users').upsert([
       { username: 'maru.lopez', password_hash: adminHash, name: 'Maru López', role: 'ADMIN', rate_per_hour: 0 },
       { username: 'maru', password_hash: adminHash, name: 'Maru López', role: 'ADMIN', rate_per_hour: 0 }
     ], { onConflict: 'username' });
 
-    // Real proyectistas with nombre.apellido and initial passwords
+    console.log('✅ Usuario Administrador maru.lopez / admin123 creado');
+
+    // Real proyectistas with nombre.apellido and randomized initial passwords
     const defaultProyectistas = [
       { username: 'lucas.perez', name: 'Arq. Lucas Pérez', pass: 'lp8421', rate: 50000 },
       { username: 'sofia.benitez', name: 'Arq. Sofía Benítez', pass: 'sb3952', rate: 60000 },
@@ -27,20 +29,23 @@ async function initDatabase() {
 
     for (const p of defaultProyectistas) {
       const hash = await bcrypt.hash(p.pass, 10);
-      await supabase.from('users').upsert({
+      const { error } = await supabase.from('users').upsert({
         username: p.username,
         password_hash: hash,
         name: p.name,
         role: 'PROYECTISTA',
         rate_per_hour: p.rate
       }, { onConflict: 'username' });
+
+      if (error) console.error(`Error al crear ${p.username}:`, error);
+      else console.log(`✅ Proyectista ${p.name} (${p.username} / ${p.pass}) creado`);
     }
 
-    // Default projects
+    // Default projects with clear descriptions
     const defaultProjects = [
-      { name: 'Obra Residencia Carmelitas', description: 'Construcción residencial de 2 plantas y quincho' },
-      { name: 'Edificio Villa Morra', description: 'Proyecto corporativo y planos de detalle' },
-      { name: 'Remodelación Casa Central', description: 'Remodelación interior y fiscalización' }
+      { name: 'Obra Residencia Carmelitas', description: 'Construcción residencial de 2 plantas y quincho en zona Carmelitas' },
+      { name: 'Edificio Villa Morra', description: 'Proyecto corporativo de 5 pisos y planos de detalle de estructura' },
+      { name: 'Remodelación Casa Central', description: 'Remodelación de fachadas interiores y fiscalización de obra' }
     ];
 
     for (const proj of defaultProjects) {
@@ -49,13 +54,13 @@ async function initDatabase() {
         description: proj.description,
         status: 'ACTIVE'
       }, { onConflict: 'name' });
+      console.log(`✅ Obra "${proj.name}" creada con descripción`);
     }
+
+    console.log('\n🎉 ¡PROCESO FINALIZADO CON ÉXITO EN SUPABASE!');
   } catch (err) {
-    console.error('⚠️ Nota al verificar datos iniciales en Supabase:', err.message);
+    console.error('❌ Error durante la siembra:', err);
   }
 }
 
-module.exports = {
-  supabase,
-  initDatabase
-};
+seed();

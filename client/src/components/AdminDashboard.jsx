@@ -1,15 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
-  DollarSign, Clock, Building2, Users, Plus, Filter, Printer, Edit2, Trash2, Search, Calendar, ChevronDown 
+  DollarSign, Clock, Building2, Users, Plus, Filter, Printer, Edit2, Trash2, Search, Calendar, RefreshCw 
 } from 'lucide-react';
 import EditProyectistaModal from './EditProyectistaModal';
 import NewProjectModal from './NewProjectModal';
 import NewTimesheetModal from './NewTimesheetModal';
+import EditTimesheetModal from './EditTimesheetModal';
 
 export default function AdminDashboard({ token, user }) {
-  const [activeTab, setActiveTab] = useState('timesheets'); // 'timesheets' | 'proyectistas' | 'projects'
+  const [activeTab, setActiveTab] = useState('timesheets');
   
-  // Data states
   const [timesheets, setTimesheets] = useState([]);
   const [proyectistas, setProyectistas] = useState([]);
   const [projects, setProjects] = useState([]);
@@ -25,25 +25,23 @@ export default function AdminDashboard({ token, user }) {
 
   // Modals state
   const [editingProyectista, setEditingProyectista] = useState(null);
+  const [editingTimesheet, setEditingTimesheet] = useState(null);
   const [showNewProyectistaModal, setShowNewProyectistaModal] = useState(false);
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [showNewTimesheetModal, setShowNewTimesheetModal] = useState(false);
 
   const formatPYG = (val) => '₲ ' + (Math.round(val || 0)).toLocaleString('es-PY');
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     try {
       const headers = { Authorization: `Bearer ${token}` };
-
-      // Build query params
       const queryParams = new URLSearchParams();
       if (startDate) queryParams.append('start_date', startDate);
       if (endDate) queryParams.append('end_date', endDate);
       if (selectedProject) queryParams.append('project_id', selectedProject);
       if (selectedProyectista) queryParams.append('user_id', selectedProyectista);
 
-      // Fetch in parallel
       const [resTimesheets, resProyectistas, resProjects, resSummary] = await Promise.all([
         fetch(`/api/timesheets?${queryParams.toString()}`, { headers }),
         fetch('/api/proyectistas', { headers }),
@@ -55,20 +53,23 @@ export default function AdminDashboard({ token, user }) {
       if (resProyectistas.ok) setProyectistas(await resProyectistas.json());
       if (resProjects.ok) setProjects(await resProjects.json());
       if (resSummary.ok) setSummary(await resSummary.json());
-
     } catch (err) {
       console.error('Error al cargar datos del dashboard:', err);
     } finally {
       setLoading(false);
     }
-  };
+  }, [token, startDate, endDate, selectedProject, selectedProyectista]);
 
   useEffect(() => {
     fetchData();
-  }, [startDate, endDate, selectedProject, selectedProyectista]);
+  }, [fetchData]);
 
   const handleDeleteTimesheet = async (id) => {
     if (!window.confirm('¿Desea eliminar este registro de horas?')) return;
+    
+    // Instant optimistic update
+    setTimesheets(prev => prev.filter(t => t.id !== id));
+    
     try {
       const res = await fetch(`/api/timesheets/${id}`, {
         method: 'DELETE',
@@ -79,6 +80,7 @@ export default function AdminDashboard({ token, user }) {
       }
     } catch (err) {
       console.error(err);
+      fetchData();
     }
   };
 
@@ -86,7 +88,6 @@ export default function AdminDashboard({ token, user }) {
     window.print();
   };
 
-  // Filter timesheets by search term
   const filteredTimesheets = timesheets.filter((t) => {
     if (!searchTerm) return true;
     const term = searchTerm.toLowerCase();
@@ -160,7 +161,7 @@ export default function AdminDashboard({ token, user }) {
           className={`tab-btn ${activeTab === 'projects' ? 'active' : ''}`}
           onClick={() => setActiveTab('projects')}
         >
-          🏛️ Obras y Proyectos
+          🏛️ Obras y Proyectos Activos
         </button>
       </div>
 
@@ -168,8 +169,16 @@ export default function AdminDashboard({ token, user }) {
       {activeTab === 'timesheets' && (
         <div className="card">
           <div className="card-title no-print">
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
               <h2>Registros de Horas, Horarios y Costos</h2>
+              <button 
+                onClick={fetchData} 
+                className="btn btn-secondary btn-sm" 
+                title="Actualizar datos al instante"
+                style={{ padding: '0.3rem 0.6rem' }}
+              >
+                <RefreshCw size={14} className={loading ? 'spin' : ''} /> Actualizar
+              </button>
             </div>
             <div style={{ display: 'flex', gap: '0.75rem' }}>
               <button onClick={handlePrint} className="btn btn-secondary btn-sm">
@@ -293,11 +302,19 @@ export default function AdminDashboard({ token, user }) {
                       <td>{formatPYG(t.rate_per_hour)}</td>
                       <td className="currency-badge">{formatPYG(t.total_cost)}</td>
                       <td style={{ maxWidth: '280px', fontSize: '0.85rem' }}>{t.description}</td>
-                      <td className="no-print">
+                      <td className="no-print" style={{ whiteSpace: 'nowrap' }}>
+                        <button
+                          onClick={() => setEditingTimesheet(t)}
+                          className="btn btn-secondary btn-sm"
+                          style={{ marginRight: '0.4rem' }}
+                          title="Editar registro"
+                        >
+                          <Edit2 size={14} />
+                        </button>
                         <button
                           onClick={() => handleDeleteTimesheet(t.id)}
                           className="btn btn-danger btn-sm"
-                          title="Eliminar registro"
+                          title="Eliminar registro (Solo Admin)"
                         >
                           <Trash2 size={14} />
                         </button>
@@ -322,7 +339,7 @@ export default function AdminDashboard({ token, user }) {
           </div>
 
           <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem', fontSize: '0.9rem' }}>
-            Aquí puedes personalizar los nombres públicos de cada proyectista, asignar cuánto gana por hora en Guaraníes (₲) y restablecer sus contraseñas de acceso.
+            Aquí puedes editar los nombres completos y usuarios de acceso en formato <strong>nombre.apellido</strong>, definir las tarifas por hora en Guaraníes (₲) y cambiar sus contraseñas.
           </p>
 
           <div className="table-container">
@@ -330,7 +347,7 @@ export default function AdminDashboard({ token, user }) {
               <thead>
                 <tr>
                   <th>Nombre Visible</th>
-                  <th>Usuario</th>
+                  <th>Usuario (nombre.apellido)</th>
                   <th>Tarifa por Hora (₲/hs)</th>
                   <th>Estado</th>
                   <th>Acciones</th>
@@ -340,7 +357,7 @@ export default function AdminDashboard({ token, user }) {
                 {proyectistas.map((p) => (
                   <tr key={p.id}>
                     <td style={{ fontWeight: 700, fontSize: '1rem' }}>{p.name}</td>
-                    <td style={{ color: 'var(--text-secondary)' }}>@{p.username}</td>
+                    <td style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>@{p.username}</td>
                     <td className="currency-badge" style={{ fontSize: '1.05rem' }}>
                       {formatPYG(p.rate_per_hour)} / hs
                     </td>
@@ -354,7 +371,7 @@ export default function AdminDashboard({ token, user }) {
                         onClick={() => setEditingProyectista(p)}
                         className="btn btn-secondary btn-sm"
                       >
-                        <Edit2 size={14} /> Editar Nombre / Tarifa
+                        <Edit2 size={14} /> Editar Nombre / Usuario / Tarifa
                       </button>
                     </td>
                   </tr>
@@ -365,11 +382,11 @@ export default function AdminDashboard({ token, user }) {
         </div>
       )}
 
-      {/* TAB 3: Projects */}
+      {/* TAB 3: Projects - CON DESCRIPCIONES DE LA OBRA Y DE LAS TAREAS REALIZADAS */}
       {activeTab === 'projects' && (
         <div className="card">
           <div className="card-title">
-            <h2>Obras y Proyectos Activos</h2>
+            <h2>Obras y Proyectos Activos (Con Detalle de Trabajos)</h2>
             <button onClick={() => setShowNewProjectModal(true)} className="btn btn-primary btn-sm">
               <Plus size={16} /> Nueva Obra
             </button>
@@ -380,26 +397,50 @@ export default function AdminDashboard({ token, user }) {
               <thead>
                 <tr>
                   <th>Nombre de la Obra</th>
-                  <th>Descripción</th>
-                  <th>Total Horas Invertidas</th>
-                  <th>Costo Total Acumulado (₲)</th>
+                  <th>Descripción del Proyecto</th>
+                  <th>Trabajos y Tareas Cargadas por Proyectistas</th>
+                  <th>Total Horas</th>
+                  <th>Costo Acumulado (₲)</th>
                   <th>Estado</th>
                 </tr>
               </thead>
               <tbody>
                 {projects.map((proj) => {
                   const projSummary = summary?.by_project?.find((bp) => bp.project_id === proj.id);
+                  // Find all recent timesheet task descriptions for this project
+                  const projTimesheets = timesheets.filter((t) => t.project_id === proj.id);
+
                   return (
                     <tr key={proj.id}>
-                      <td style={{ fontWeight: 700, fontSize: '1rem' }}>{proj.name}</td>
-                      <td style={{ color: 'var(--text-secondary)', maxWidth: '300px' }}>{proj.description || 'Sin descripción'}</td>
-                      <td style={{ fontWeight: 600, color: 'var(--accent-blue)' }}>
+                      <td style={{ fontWeight: 700, fontSize: '1rem', verticalAlign: 'top' }}>{proj.name}</td>
+                      <td style={{ color: 'var(--text-primary)', maxWidth: '250px', verticalAlign: 'top', fontSize: '0.9rem' }}>
+                        <strong>{proj.description || 'Sin descripción principal'}</strong>
+                      </td>
+                      <td style={{ maxWidth: '350px', verticalAlign: 'top', fontSize: '0.85rem' }}>
+                        {projTimesheets.length === 0 ? (
+                          <span style={{ color: 'var(--text-muted)' }}>Sin avances cargados aún.</span>
+                        ) : (
+                          <ul style={{ paddingLeft: '1rem', margin: 0, display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                            {projTimesheets.slice(0, 4).map((t) => (
+                              <li key={t.id}>
+                                <span style={{ color: 'var(--accent-gold)', fontWeight: 600 }}>{t.user_name}</span>: {t.description} ({t.hours} hs)
+                              </li>
+                            ))}
+                            {projTimesheets.length > 4 && (
+                              <li style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                                + {projTimesheets.length - 4} tareas más...
+                              </li>
+                            )}
+                          </ul>
+                        )}
+                      </td>
+                      <td style={{ fontWeight: 600, color: 'var(--accent-blue)', verticalAlign: 'top' }}>
                         {(projSummary?.hours || 0).toFixed(1)} hs
                       </td>
-                      <td className="currency-badge">
+                      <td className="currency-badge" style={{ verticalAlign: 'top' }}>
                         {formatPYG(projSummary?.cost || 0)}
                       </td>
-                      <td>
+                      <td style={{ verticalAlign: 'top' }}>
                         <span style={{
                           padding: '0.2rem 0.6rem',
                           borderRadius: 'var(--radius-full)',
@@ -428,6 +469,19 @@ export default function AdminDashboard({ token, user }) {
           onClose={() => setEditingProyectista(null)}
           onSuccess={() => {
             setEditingProyectista(null);
+            fetchData();
+          }}
+        />
+      )}
+
+      {editingTimesheet && (
+        <EditTimesheetModal
+          token={token}
+          timesheet={editingTimesheet}
+          projects={projects}
+          onClose={() => setEditingTimesheet(null)}
+          onSuccess={() => {
+            setEditingTimesheet(null);
             fetchData();
           }}
         />

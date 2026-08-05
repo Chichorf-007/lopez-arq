@@ -33,12 +33,6 @@ export default function Login({ onLoginSuccess }) {
     }
   };
 
-  const setQuickAccess = (u, p) => {
-    setUsername(u);
-    setPassword(p);
-    setError('');
-  };
-
   return (
     <div className="login-wrapper">
       <div className="login-card">
@@ -67,14 +61,14 @@ export default function Login({ onLoginSuccess }) {
 
         <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <label className="form-label">Usuario</label>
+            <label className="form-label">Usuario (ej: nombre.apellido)</label>
             <div style={{ position: 'relative' }}>
               <User size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
               <input
                 type="text"
                 className="form-input"
                 style={{ paddingLeft: '2.4rem' }}
-                placeholder="Ej: maru o proyectista1"
+                placeholder="Ej: maru.lopez o lucas.perez"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 required
@@ -103,35 +97,6 @@ export default function Login({ onLoginSuccess }) {
             <ArrowRight size={18} />
           </button>
         </form>
-
-        <div className="login-hints">
-          <div style={{ fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>
-            Acceso Rápido de Prueba:
-          </div>
-          <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-            <button
-              onClick={() => setQuickAccess('maru', 'admin123')}
-              className="btn btn-secondary btn-sm"
-              style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
-            >
-              👑 Maru López (Admin)
-            </button>
-            <button
-              onClick={() => setQuickAccess('proyectista1', '123456')}
-              className="btn btn-secondary btn-sm"
-              style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
-            >
-              👷 Proyectista 1
-            </button>
-            <button
-              onClick={() => setQuickAccess('proyectista2', '123456')}
-              className="btn btn-secondary btn-sm"
-              style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
-            >
-              👷 Proyectista 2
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   );

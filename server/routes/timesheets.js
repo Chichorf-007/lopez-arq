@@ -140,7 +140,6 @@ router.get('/summary', authenticateToken, async (req, res) => {
       totalHours += h;
       totalCost += cost;
 
-      // Project breakdown
       const pId = row.project_id;
       const pName = row.projects?.name || 'Obra';
       if (!projectMap[pId]) {
@@ -149,7 +148,6 @@ router.get('/summary', authenticateToken, async (req, res) => {
       projectMap[pId].hours += h;
       projectMap[pId].cost += cost;
 
-      // User breakdown
       const uId = row.user_id;
       const uName = row.users?.name || 'Proyectista';
       if (!userMap[uId]) {
@@ -235,7 +233,7 @@ router.post('/', authenticateToken, async (req, res) => {
   }
 });
 
-// PUT /api/timesheets/:id - Edit timesheet entry
+// PUT /api/timesheets/:id - Edit timesheet entry (Allowed for owner or admin)
 router.put('/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
@@ -277,10 +275,15 @@ router.put('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// DELETE /api/timesheets/:id - Delete timesheet entry
+// DELETE /api/timesheets/:id - Delete timesheet entry (STRICTLY ADMIN ONLY)
 router.delete('/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
+
+    if (req.user.role !== 'ADMIN') {
+      return res.status(403).json({ error: 'Únicamente la dirección (Maru López) puede eliminar registros de horas' });
+    }
+
     const { error } = await supabase.from('timesheets').delete().eq('id', id);
     if (error) throw error;
 
