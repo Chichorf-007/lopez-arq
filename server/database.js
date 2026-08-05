@@ -7,51 +7,20 @@ const SUPABASE_KEY = process.env.SUPABASE_KEY || 'sb_publishable_f_BqO47yu0_5foc
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 async function initDatabase() {
-  console.log('🔄 Verificando tablas e inicializando datos por defecto en Supabase...');
+  console.log('🔄 Verificando tablas y usuario administrador en Supabase...');
 
   try {
     const adminHash = await bcrypt.hash('admin123', 10);
 
-    // Upsert admin maru.lopez
+    // Upsert admin maru.lopez and maru
     await supabase.from('users').upsert([
       { username: 'maru.lopez', password_hash: adminHash, name: 'Maru López', role: 'ADMIN', rate_per_hour: 0 },
       { username: 'maru', password_hash: adminHash, name: 'Maru López', role: 'ADMIN', rate_per_hour: 0 }
     ], { onConflict: 'username' });
 
-    // Real proyectistas with nombre.apellido and initial passwords
-    const defaultProyectistas = [
-      { username: 'lucas.perez', name: 'Arq. Lucas Pérez', pass: 'lp8421', rate: 50000 },
-      { username: 'sofia.benitez', name: 'Arq. Sofía Benítez', pass: 'sb3952', rate: 60000 },
-      { username: 'rodrigo.silva', name: 'Arq. Rodrigo Silva', pass: 'rs7164', rate: 55000 }
-    ];
-
-    for (const p of defaultProyectistas) {
-      const hash = await bcrypt.hash(p.pass, 10);
-      await supabase.from('users').upsert({
-        username: p.username,
-        password_hash: hash,
-        name: p.name,
-        role: 'PROYECTISTA',
-        rate_per_hour: p.rate
-      }, { onConflict: 'username' });
-    }
-
-    // Default projects
-    const defaultProjects = [
-      { name: 'Obra Residencia Carmelitas', description: 'Construcción residencial de 2 plantas y quincho' },
-      { name: 'Edificio Villa Morra', description: 'Proyecto corporativo y planos de detalle' },
-      { name: 'Remodelación Casa Central', description: 'Remodelación interior y fiscalización' }
-    ];
-
-    for (const proj of defaultProjects) {
-      await supabase.from('projects').upsert({
-        name: proj.name,
-        description: proj.description,
-        status: 'ACTIVE'
-      }, { onConflict: 'name' });
-    }
+    console.log('✅ Usuario Administrador Maru López verificado');
   } catch (err) {
-    console.error('⚠️ Nota al verificar datos iniciales en Supabase:', err.message);
+    console.error('⚠️ Nota al verificar base de datos en Supabase:', err.message);
   }
 }
 
