@@ -9,7 +9,7 @@ import EditTimesheetModal from './EditTimesheetModal';
 import ReceiptModal from './ReceiptModal';
 
 export default function AdminDashboard({ token, user }) {
-  const [activeTab, setActiveTab] = useState('settlement'); // Default to weekly settlement ('settlement' | 'timesheets' | 'proyectistas' | 'projects')
+  const [activeTab, setActiveTab] = useState('settlement');
   
   const [timesheets, setTimesheets] = useState([]);
   const [proyectistas, setProyectistas] = useState([]);
@@ -48,6 +48,32 @@ export default function AdminDashboard({ token, user }) {
 
   const formatPYG = (val) => '₲ ' + (Math.round(val || 0)).toLocaleString('es-PY');
 
+  const formatDateWithDay = (dateStr) => {
+    if (!dateStr) return '';
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const date = new Date(y, m - 1, d);
+    const days = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+    const dayName = days[date.getDay()];
+    return `${dayName} ${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}/${y}`;
+  };
+
+  const getDayColor = (dateStr) => {
+    if (!dateStr) return { bg: 'rgba(255,255,255,0.05)', color: '#FFF' };
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const date = new Date(y, m - 1, d);
+    const day = date.getDay();
+    const colors = [
+      { bg: 'rgba(100, 116, 139, 0.2)', color: '#94A3B8' }, // Dom
+      { bg: 'rgba(59, 130, 246, 0.2)', color: '#60A5FA' },  // Lun
+      { bg: 'rgba(16, 185, 129, 0.2)', color: '#34D399' },  // Mar
+      { bg: 'rgba(168, 85, 247, 0.2)', color: '#C084FC' },  // Mié
+      { bg: 'rgba(245, 158, 11, 0.2)', color: '#FBBF24' },  // Jue
+      { bg: 'rgba(236, 72, 153, 0.2)', color: '#F472B6' },  // Vie
+      { bg: 'rgba(234, 179, 8, 0.25)', color: '#FACC15' }   // Sáb
+    ];
+    return colors[day] || colors[0];
+  };
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
@@ -84,7 +110,6 @@ export default function AdminDashboard({ token, user }) {
   const weeklySettlements = useMemo(() => {
     if (!proyectistas.length || !timesheets.length) return [];
 
-    // Filter timesheets within settlementStart and settlementEnd
     const weekTimesheets = timesheets.filter((t) => {
       if (settlementStart && t.work_date < settlementStart) return false;
       if (settlementEnd && t.work_date > settlementEnd) return false;
@@ -95,7 +120,6 @@ export default function AdminDashboard({ token, user }) {
       const pTimesheets = weekTimesheets.filter((t) => String(t.user_id) === String(p.id));
       const rate = p.rate_per_hour || 0;
 
-      // Group by project
       const projMap = {};
       let totalHours = 0;
 
@@ -124,7 +148,6 @@ export default function AdminDashboard({ token, user }) {
     });
   }, [proyectistas, timesheets, settlementStart, settlementEnd]);
 
-  // Total payroll for the weekly settlement
   const totalWeeklyPayroll = useMemo(() => {
     return weeklySettlements.reduce((sum, s) => sum + s.total_cost, 0);
   }, [weeklySettlements]);
@@ -187,7 +210,7 @@ export default function AdminDashboard({ token, user }) {
             <Building2 size={24} />
           </div>
           <div className="metric-info">
-            <span className="label">Obras en Ejecución</span>
+            <span className="label">Proyectos / Obras en ejecución</span>
             <div className="value">{projects.filter(p => p.status === 'ACTIVE').length}</div>
           </div>
         </div>
@@ -227,11 +250,11 @@ export default function AdminDashboard({ token, user }) {
           className={`tab-btn ${activeTab === 'projects' ? 'active' : ''}`}
           onClick={() => setActiveTab('projects')}
         >
-          🏛️ Obras y Proyectos
+          🏛️ Proyectos / Obras en ejecución
         </button>
       </div>
 
-      {/* TAB 0: TABLA DE CIERRE SEMANAL Y EMISIÓN DE RECIBOS (PAGOS DEL SÁBADO) */}
+      {/* TAB 0: TABLA DE CIERRE SEMANAL Y EMISIÓN DE RECIBOS */}
       {activeTab === 'settlement' && (
         <div className="card">
           <div className="card-title no-print" style={{ flexWrap: 'wrap', gap: '1rem' }}>
@@ -242,7 +265,6 @@ export default function AdminDashboard({ token, user }) {
               </p>
             </div>
 
-            {/* Week Selector */}
             <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', background: 'var(--bg-input)', padding: '0.5rem 1rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }}>
               <div>
                 <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block' }}>Desde (Lunes)</label>
@@ -267,7 +289,6 @@ export default function AdminDashboard({ token, user }) {
             </div>
           </div>
 
-          {/* Table / Settlement Cards */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))', gap: '1.25rem', marginTop: '1rem' }}>
             {weeklySettlements.map((s) => (
               <div 
@@ -293,10 +314,9 @@ export default function AdminDashboard({ token, user }) {
                     </span>
                   </div>
 
-                  {/* Projects Breakdown for this proyectista */}
                   <div style={{ borderTop: '1px solid var(--border-color)', borderBottom: '1px solid var(--border-color)', padding: '0.75rem 0', margin: '0.75rem 0' }}>
                     <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', display: 'block', marginBottom: '0.4rem' }}>
-                      Detalle de Obras en la Semana:
+                      Detalle de Proyectos en la Semana:
                     </span>
                     {s.projects.length === 0 ? (
                       <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>Sin horas registradas en esta semana.</span>
@@ -315,7 +335,6 @@ export default function AdminDashboard({ token, user }) {
                   </div>
                 </div>
 
-                {/* Footer Totals & Receipt Action */}
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
                     <div>
@@ -397,13 +416,13 @@ export default function AdminDashboard({ token, user }) {
               />
             </div>
             <div>
-              <label className="form-label">Filtrar Obra</label>
+              <label className="form-label">Filtrar Proyecto/Obra</label>
               <select
                 className="form-select"
                 value={selectedProject}
                 onChange={(e) => setSelectedProject(e.target.value)}
               >
-                <option value="">Todas las obras</option>
+                <option value="">Todos los proyectos</option>
                 {projects.map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
@@ -439,9 +458,9 @@ export default function AdminDashboard({ token, user }) {
             <table className="custom-table">
               <thead>
                 <tr>
-                  <th>Fecha</th>
+                  <th>Día / Fecha</th>
                   <th>Proyectista</th>
-                  <th>Obra / Proyecto</th>
+                  <th>Proyecto / Obra</th>
                   <th>Horario (Inicio - Fin)</th>
                   <th>Total Horas</th>
                   <th>Tarifa (₲/hs)</th>
@@ -458,46 +477,62 @@ export default function AdminDashboard({ token, user }) {
                     </td>
                   </tr>
                 ) : (
-                  filteredTimesheets.map((t) => (
-                    <tr key={t.id}>
-                      <td style={{ fontWeight: 600 }}>{t.work_date}</td>
-                      <td>{t.user_name}</td>
-                      <td>
-                        <span style={{ 
-                          background: 'rgba(255,255,255,0.06)', 
-                          padding: '0.2rem 0.6rem', 
-                          borderRadius: '4px', 
-                          fontWeight: 500 
-                        }}>
-                          {t.project_name}
-                        </span>
-                      </td>
-                      <td style={{ fontWeight: 600, color: 'var(--accent-gold)' }}>
-                        🕒 {t.start_time || '08:00'} a {t.end_time || '12:00'} hs
-                      </td>
-                      <td style={{ fontWeight: 700, color: 'var(--accent-blue)' }}>{t.hours} hs</td>
-                      <td>{formatPYG(t.rate_per_hour)}</td>
-                      <td className="currency-badge">{formatPYG(t.total_cost)}</td>
-                      <td style={{ maxWidth: '280px', fontSize: '0.85rem' }}>{t.description}</td>
-                      <td className="no-print" style={{ whiteSpace: 'nowrap' }}>
-                        <button
-                          onClick={() => setEditingTimesheet(t)}
-                          className="btn btn-secondary btn-sm"
-                          style={{ marginRight: '0.4rem' }}
-                          title="Editar registro"
-                        >
-                          <Edit2 size={14} />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteTimesheet(t.id)}
-                          className="btn btn-danger btn-sm"
-                          title="Eliminar registro (Solo Admin)"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))
+                  filteredTimesheets.map((t) => {
+                    const dayStyle = getDayColor(t.work_date);
+                    return (
+                      <tr key={t.id}>
+                        <td>
+                          <span style={{
+                            background: dayStyle.bg,
+                            color: dayStyle.color,
+                            padding: '0.3rem 0.65rem',
+                            borderRadius: '6px',
+                            fontWeight: 700,
+                            fontSize: '0.85rem',
+                            display: 'inline-block',
+                            border: `1px solid ${dayStyle.color}40`
+                          }}>
+                            📅 {formatDateWithDay(t.work_date)}
+                          </span>
+                        </td>
+                        <td>{t.user_name}</td>
+                        <td>
+                          <span style={{ 
+                            background: 'rgba(255,255,255,0.06)', 
+                            padding: '0.2rem 0.6rem', 
+                            borderRadius: '4px', 
+                            fontWeight: 500 
+                          }}>
+                            {t.project_name}
+                          </span>
+                        </td>
+                        <td style={{ fontWeight: 600, color: 'var(--accent-gold)' }}>
+                          🕒 {t.start_time || '08:00'} a {t.end_time || '12:00'} hs
+                        </td>
+                        <td style={{ fontWeight: 700, color: 'var(--accent-blue)' }}>{t.hours} hs</td>
+                        <td>{formatPYG(t.rate_per_hour)}</td>
+                        <td className="currency-badge">{formatPYG(t.total_cost)}</td>
+                        <td style={{ maxWidth: '280px', fontSize: '0.85rem' }}>{t.description}</td>
+                        <td className="no-print" style={{ whiteSpace: 'nowrap' }}>
+                          <button
+                            onClick={() => setEditingTimesheet(t)}
+                            className="btn btn-secondary btn-sm"
+                            style={{ marginRight: '0.4rem' }}
+                            title="Editar registro"
+                          >
+                            <Edit2 size={14} />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteTimesheet(t.id)}
+                            className="btn btn-danger btn-sm"
+                            title="Eliminar registro (Solo Admin)"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -563,7 +598,7 @@ export default function AdminDashboard({ token, user }) {
       {activeTab === 'projects' && (
         <div className="card">
           <div className="card-title">
-            <h2>Obras y Proyectos Activos (Con Detalle de Trabajos)</h2>
+            <h2>Proyectos / Obras en ejecución (Con Detalle de Trabajos)</h2>
             <button onClick={() => setShowNewProjectModal(true)} className="btn btn-primary btn-sm">
               <Plus size={16} /> Nueva Obra
             </button>
