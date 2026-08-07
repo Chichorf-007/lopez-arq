@@ -1,14 +1,15 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
-  DollarSign, Clock, Building2, Users, Plus, Filter, Printer, Edit2, Trash2, Search, Calendar, RefreshCw 
+  DollarSign, Clock, Building2, Users, Plus, Filter, Printer, Edit2, Trash2, Search, Calendar, RefreshCw, FileText, CheckCircle2 
 } from 'lucide-react';
 import EditProyectistaModal from './EditProyectistaModal';
 import NewProjectModal from './NewProjectModal';
 import NewTimesheetModal from './NewTimesheetModal';
 import EditTimesheetModal from './EditTimesheetModal';
+import ReceiptModal from './ReceiptModal';
 
 export default function AdminDashboard({ token, user }) {
-  const [activeTab, setActiveTab] = useState('timesheets');
+  const [activeTab, setActiveTab] = useState('settlement'); // Default to weekly settlement ('settlement' | 'timesheets' | 'proyectistas' | 'projects')
   
   const [timesheets, setTimesheets] = useState([]);
   const [proyectistas, setProyectistas] = useState([]);
@@ -16,7 +17,21 @@ export default function AdminDashboard({ token, user }) {
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Filters state
+  // Weekly Saturday settlement date range (Default: Monday to Saturday of current week)
+  const getWeekRange = () => {
+    const d = new Date();
+    const day = d.getDay();
+    const diffToMon = d.getDate() - day + (day === 0 ? -6 : 1);
+    const mon = new Date(d.setDate(diffToMon)).toISOString().split('T')[0];
+    const sat = new Date(d.setDate(diffToMon + 5)).toISOString().split('T')[0];
+    return { mon, sat };
+  };
+
+  const initialWeek = getWeekRange();
+  const [settlementStart, setSettlementStart] = useState(initialWeek.mon);
+  const [settlementEnd, setSettlementEnd] = useState(initialWeek.sat);
+
+  // Filters state for general timesheets tab
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [selectedProject, setSelectedProject] = useState('');
@@ -26,6 +41,7 @@ export default function AdminDashboard({ token, user }) {
   // Modals state
   const [editingProyectista, setEditingProyectista] = useState(null);
   const [editingTimesheet, setEditingTimesheet] = useState(null);
+  const [selectedReceipt, setSelectedReceipt] = useState(null);
   const [showNewProyectistaModal, setShowNewProyectistaModal] = useState(false);
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [showNewTimesheetModal, setShowNewTimesheetModal] = useState(false);
@@ -64,20 +80,64 @@ export default function AdminDashboard({ token, user }) {
     fetchData();
   }, [fetchData]);
 
+  // Compute Weekly Saturday Settlement per Proyectista
+  const weeklySettlements = useMemo(() => {
+    if (!proyectistas.length || !timesheets.length) return [];
+
+    // Filter timesheets within settlementStart and settlementEnd
+    const weekTimesheets = timesheets.filter((t) => {
+      if (settlementStart && t.work_date < settlementStart) return false;
+      if (settlementEnd && t.work_date > settlementEnd) return false;
+      return true;
+    });
+
+    return proyectistas.map((p) => {
+      const pTimesheets = weekTimesheets.filter((t) => String(t.user_id) === String(p.id));
+      const rate = p.rate_per_hour || 0;
+
+      // Group by project
+      const projMap = {};
+      let totalHours = 0;
+
+      pTimesheets.forEach((t) => {
+        const h = parseFloat(t.hours) || 0;
+        totalHours += h;
+        if (!projMap[t.project_id]) {
+          projMap[t.project_id] = { project_id: t.project_id, project_name: t.project_name, hours: 0 };
+        }
+        projMap[t.project_id].hours += h;
+      });
+
+      const totalCost = totalHours * rate;
+
+      return {
+        user_id: p.id,
+        user_name: p.name,
+        user_username: p.username,
+        rate_per_hour: rate,
+        total_hours: totalHours,
+        total_cost: totalCost,
+        projects: Object.values(projMap),
+        period_start: settlementStart,
+        period_end: settlementEnd
+      };
+    });
+  }, [proyectistas, timesheets, settlementStart, settlementEnd]);
+
+  // Total payroll for the weekly settlement
+  const totalWeeklyPayroll = useMemo(() => {
+    return weeklySettlements.reduce((sum, s) => sum + s.total_cost, 0);
+  }, [weeklySettlements]);
+
   const handleDeleteTimesheet = async (id) => {
     if (!window.confirm('¿Desea eliminar este registro de horas?')) return;
-    
-    // Instant optimistic update
     setTimesheets(prev => prev.filter(t => t.id !== id));
-    
     try {
       const res = await fetch(`/api/timesheets/${id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` }
       });
-      if (res.ok) {
-        fetchData();
-      }
+      if (res.ok) fetchData();
     } catch (err) {
       console.error(err);
       fetchData();
@@ -102,13 +162,13 @@ export default function AdminDashboard({ token, user }) {
     <div>
       {/* Top Banner / Metrics */}
       <div className="metrics-grid">
-        <div className="metric-card">
+        <div className="metric-card" style={{ borderLeftColor: 'var(--accent-gold)' }}>
           <div className="metric-icon">
             <DollarSign size={24} />
           </div>
           <div className="metric-info">
-            <span className="label">Total Inversión (Guaraníes)</span>
-            <div className="value">{formatPYG(summary?.total_cost)}</div>
+            <span className="label">Nómina a Pagar este Sábado</span>
+            <div className="value" style={{ color: 'var(--accent-gold)' }}>{formatPYG(totalWeeklyPayroll)}</div>
           </div>
         </div>
 
@@ -117,7 +177,7 @@ export default function AdminDashboard({ token, user }) {
             <Clock size={24} />
           </div>
           <div className="metric-info">
-            <span className="label">Total Horas Trabajadas</span>
+            <span className="label">Total Horas Registradas</span>
             <div className="value">{(summary?.total_hours || 0).toFixed(1)} hs</div>
           </div>
         </div>
@@ -127,7 +187,7 @@ export default function AdminDashboard({ token, user }) {
             <Building2 size={24} />
           </div>
           <div className="metric-info">
-            <span className="label">Obras en Curso</span>
+            <span className="label">Obras en Ejecución</span>
             <div className="value">{projects.filter(p => p.status === 'ACTIVE').length}</div>
           </div>
         </div>
@@ -137,7 +197,7 @@ export default function AdminDashboard({ token, user }) {
             <Users size={24} />
           </div>
           <div className="metric-info">
-            <span className="label">Proyectistas</span>
+            <span className="label">Proyectistas Activos</span>
             <div className="value">{proyectistas.length}</div>
           </div>
         </div>
@@ -146,10 +206,16 @@ export default function AdminDashboard({ token, user }) {
       {/* Tabs Header */}
       <div className="tabs-header no-print">
         <button
+          className={`tab-btn ${activeTab === 'settlement' ? 'active' : ''}`}
+          onClick={() => setActiveTab('settlement')}
+        >
+          💵 Cierre Semanal de Pagos y Recibos (Sábados)
+        </button>
+        <button
           className={`tab-btn ${activeTab === 'timesheets' ? 'active' : ''}`}
           onClick={() => setActiveTab('timesheets')}
         >
-          ⏱️ Reporte Semanal y Horarios
+          ⏱️ Reporte General de Horas y Horarios
         </button>
         <button
           className={`tab-btn ${activeTab === 'proyectistas' ? 'active' : ''}`}
@@ -161,11 +227,122 @@ export default function AdminDashboard({ token, user }) {
           className={`tab-btn ${activeTab === 'projects' ? 'active' : ''}`}
           onClick={() => setActiveTab('projects')}
         >
-          🏛️ Obras y Proyectos Activos
+          🏛️ Obras y Proyectos
         </button>
       </div>
 
-      {/* TAB 1: Timesheets / Horas */}
+      {/* TAB 0: TABLA DE CIERRE SEMANAL Y EMISIÓN DE RECIBOS (PAGOS DEL SÁBADO) */}
+      {activeTab === 'settlement' && (
+        <div className="card">
+          <div className="card-title no-print" style={{ flexWrap: 'wrap', gap: '1rem' }}>
+            <div>
+              <h2>🗓️ Cierre de Pagos Semanales (Sábado Mediodía)</h2>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', margin: 0 }}>
+                Resumen de cuánto estás pagando a cada proyectista esta semana con desglose por obra y generador de recibos oficiales.
+              </p>
+            </div>
+
+            {/* Week Selector */}
+            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', background: 'var(--bg-input)', padding: '0.5rem 1rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }}>
+              <div>
+                <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block' }}>Desde (Lunes)</label>
+                <input
+                  type="date"
+                  className="form-input"
+                  style={{ padding: '0.2rem 0.5rem', fontSize: '0.85rem' }}
+                  value={settlementStart}
+                  onChange={(e) => setSettlementStart(e.target.value)}
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block' }}>Hasta (Sábado)</label>
+                <input
+                  type="date"
+                  className="form-input"
+                  style={{ padding: '0.2rem 0.5rem', fontSize: '0.85rem' }}
+                  value={settlementEnd}
+                  onChange={(e) => setSettlementEnd(e.target.value)}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Table / Settlement Cards */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))', gap: '1.25rem', marginTop: '1rem' }}>
+            {weeklySettlements.map((s) => (
+              <div 
+                key={s.user_id} 
+                style={{
+                  background: 'var(--bg-input)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '1.25rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between'
+                }}
+              >
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
+                    <div>
+                      <strong style={{ fontSize: '1.1rem', color: 'var(--text-primary)', display: 'block' }}>{s.user_name}</strong>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>@{s.user_username}</span>
+                    </div>
+                    <span style={{ background: 'rgba(234,179,8,0.15)', color: 'var(--accent-gold)', padding: '0.2rem 0.6rem', borderRadius: '4px', fontSize: '0.8rem', fontWeight: 700 }}>
+                      Tarifa: {formatPYG(s.rate_per_hour)}/hs
+                    </span>
+                  </div>
+
+                  {/* Projects Breakdown for this proyectista */}
+                  <div style={{ borderTop: '1px solid var(--border-color)', borderBottom: '1px solid var(--border-color)', padding: '0.75rem 0', margin: '0.75rem 0' }}>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', display: 'block', marginBottom: '0.4rem' }}>
+                      Detalle de Obras en la Semana:
+                    </span>
+                    {s.projects.length === 0 ? (
+                      <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>Sin horas registradas en esta semana.</span>
+                    ) : (
+                      <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.4rem', fontSize: '0.85rem' }}>
+                        {s.projects.map((p) => (
+                          <li key={p.project_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ color: 'var(--text-primary)' }}>• {p.project_name}</span>
+                            <span style={{ fontWeight: 600, color: 'var(--accent-blue)' }}>
+                              {p.hours.toFixed(1)} hs ({formatPYG(p.hours * s.rate_per_hour)})
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+
+                {/* Footer Totals & Receipt Action */}
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                    <div>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block' }}>TOTAL HORAS: {s.total_hours.toFixed(1)} hs</span>
+                      <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)' }}>A PAGAR EL SÁBADO:</span>
+                    </div>
+                    <div style={{ fontSize: '1.45rem', fontWeight: 800, color: 'var(--accent-gold)', fontFamily: 'var(--font-heading)' }}>
+                      {formatPYG(s.total_cost)}
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => setSelectedReceipt(s)}
+                    className="btn btn-primary"
+                    style={{ width: '100%', fontSize: '0.85rem' }}
+                    disabled={s.total_hours === 0}
+                  >
+                    <FileText size={16} /> 🧾 Generar Recibo de Pago Imprimible
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 1: General Timesheets / Horas */}
       {activeTab === 'timesheets' && (
         <div className="card">
           <div className="card-title no-print">
@@ -382,7 +559,7 @@ export default function AdminDashboard({ token, user }) {
         </div>
       )}
 
-      {/* TAB 3: Projects - CON DESCRIPCIONES DE LA OBRA Y DE LAS TAREAS REALIZADAS */}
+      {/* TAB 3: Projects */}
       {activeTab === 'projects' && (
         <div className="card">
           <div className="card-title">
@@ -407,7 +584,6 @@ export default function AdminDashboard({ token, user }) {
               <tbody>
                 {projects.map((proj) => {
                   const projSummary = summary?.by_project?.find((bp) => bp.project_id === proj.id);
-                  // Find all recent timesheet task descriptions for this project
                   const projTimesheets = timesheets.filter((t) => t.project_id === proj.id);
 
                   return (
@@ -462,6 +638,13 @@ export default function AdminDashboard({ token, user }) {
       )}
 
       {/* Modals */}
+      {selectedReceipt && (
+        <ReceiptModal
+          settlement={selectedReceipt}
+          onClose={() => setSelectedReceipt(null)}
+        />
+      )}
+
       {editingProyectista && (
         <EditProyectistaModal
           token={token}
