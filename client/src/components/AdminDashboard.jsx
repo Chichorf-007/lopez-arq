@@ -167,6 +167,27 @@ export default function AdminDashboard({ token, user }) {
     }
   };
 
+  const handleDeleteProject = async (id, name) => {
+    if (!window.confirm(`¿Desea eliminar la obra "${name}"? Esta acción eliminará el proyecto y sus desgloses.`)) return;
+    setProjects(prev => prev.filter(p => p.id !== id));
+    try {
+      const res = await fetch(`/api/projects/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        fetchData();
+      } else {
+        const data = await res.json();
+        alert(data.error || 'Error al eliminar obra');
+        fetchData();
+      }
+    } catch (err) {
+      console.error(err);
+      fetchData();
+    }
+  };
+
   const handlePrint = () => {
     window.print();
   };
@@ -614,6 +635,7 @@ export default function AdminDashboard({ token, user }) {
                   <th>Total Horas</th>
                   <th>Costo Acumulado (₲)</th>
                   <th>Estado</th>
+                  <th className="no-print">Acciones</th>
                 </tr>
               </thead>
               <tbody>
@@ -662,6 +684,15 @@ export default function AdminDashboard({ token, user }) {
                         }}>
                           {proj.status === 'ACTIVE' ? 'En Ejecución' : 'Completado'}
                         </span>
+                      </td>
+                      <td className="no-print" style={{ verticalAlign: 'top' }}>
+                        <button
+                          onClick={() => handleDeleteProject(proj.id, proj.name)}
+                          className="btn btn-danger btn-sm"
+                          title="Eliminar esta obra/proyecto"
+                        >
+                          <Trash2 size={14} /> Eliminar Obra
+                        </button>
                       </td>
                     </tr>
                   );

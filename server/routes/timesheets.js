@@ -233,7 +233,7 @@ router.post('/', authenticateToken, async (req, res) => {
   }
 });
 
-// PUT /api/timesheets/:id - Edit timesheet entry (Allowed for owner or admin)
+// PUT /api/timesheets/:id - Edit timesheet entry
 router.put('/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
@@ -275,13 +275,23 @@ router.put('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// DELETE /api/timesheets/:id - Delete timesheet entry (STRICTLY ADMIN ONLY)
+// DELETE /api/timesheets/:id - Delete timesheet entry (Allowed for owner or admin)
 router.delete('/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
 
-    if (req.user.role !== 'ADMIN') {
-      return res.status(403).json({ error: 'Únicamente la dirección (Maru López) puede eliminar registros de horas' });
+    const { data: existing } = await supabase
+      .from('timesheets')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (!existing) {
+      return res.status(404).json({ error: 'Registro de horas no encontrado' });
+    }
+
+    if (req.user.role !== 'ADMIN' && existing.user_id !== req.user.id) {
+      return res.status(403).json({ error: 'No tienes permiso para eliminar este registro' });
     }
 
     const { error } = await supabase.from('timesheets').delete().eq('id', id);

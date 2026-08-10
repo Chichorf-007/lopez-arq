@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Clock, Building2, Plus, Calendar, History, Edit2, Filter, ArrowUpDown, RefreshCw } from 'lucide-react';
+import { Clock, Building2, Plus, Calendar, History, Edit2, Trash2, Filter, ArrowUpDown, RefreshCw } from 'lucide-react';
 import NewTimesheetModal from './NewTimesheetModal';
 import EditTimesheetModal from './EditTimesheetModal';
 
@@ -66,7 +66,7 @@ export default function ProyectistaDashboard({ token, user }) {
       if (endDate) queryParams.append('end_date', endDate);
 
       const [resTimesheets, resProjects, resSummary] = await Promise.all([
-        fetch('/api/timesheets', { headers }), // Fetch all user timesheets for client-side filtering
+        fetch('/api/timesheets', { headers }),
         fetch('/api/projects', { headers }),
         fetch(`/api/timesheets/summary?${queryParams.toString()}`, { headers })
       ]);
@@ -85,7 +85,21 @@ export default function ProyectistaDashboard({ token, user }) {
     fetchData();
   }, [startDate, endDate]);
 
-  // Compute period total hours and lifetime total hours
+  const handleDeleteTimesheet = async (id) => {
+    if (!window.confirm('¿Desea eliminar este registro de horas cargado por error?')) return;
+    setTimesheets(prev => prev.filter(t => t.id !== id));
+    try {
+      const res = await fetch(`/api/timesheets/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) fetchData();
+    } catch (err) {
+      console.error(err);
+      fetchData();
+    }
+  };
+
   const filteredTimesheetsByDate = useMemo(() => {
     return timesheets.filter((t) => {
       if (startDate && t.work_date < startDate) return false;
@@ -102,7 +116,6 @@ export default function ProyectistaDashboard({ token, user }) {
     return timesheets.reduce((sum, t) => sum + (parseFloat(t.hours) || 0), 0);
   }, [timesheets]);
 
-  // Filter and sort personal timesheets for display table
   const processedTimesheets = useMemo(() => {
     return filteredTimesheetsByDate
       .filter((t) => {
@@ -287,14 +300,12 @@ export default function ProyectistaDashboard({ token, user }) {
           </div>
           <ul style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', paddingLeft: '1.2rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
             <li>Es obligatorio indicar la <strong>Hora de Inicio</strong> y <strong>Hora de fin de tu proyecto</strong> (ej: 13:00 a 15:00 hs).</li>
-            <li>El sistema calculará automáticamente la cantidad total de horas transcurridas.</li>
-            <li>Cada día tiene una **etiqueta de color distintiva (Lun, Mar, Mié, Jue, Vie, Sáb)** para distinguir claramente los días trabajados.</li>
-            <li>Puedes editar tus cargas anteriores haciendo clic en ✏️ <strong>Editar</strong>.</li>
+            <li>Si cargaste mal una hora, puedes modificarla con el botón ✏️ <strong>Editar</strong> o borrarla con 🗑️ <strong>Eliminar</strong>.</li>
           </ul>
         </div>
       </div>
 
-      {/* Historial Detallado con Separación por Día y Filtro por Proyecto */}
+      {/* Historial Detallado */}
       <div className="card">
         <div className="card-title" style={{ flexWrap: 'wrap', gap: '1rem' }}>
           <h2>📋 Mi Historial de Registros</h2>
@@ -387,13 +398,21 @@ export default function ProyectistaDashboard({ token, user }) {
                       </td>
                       <td style={{ fontWeight: 700, color: 'var(--accent-blue)', fontSize: '1rem' }}>{t.hours} hs</td>
                       <td style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>{t.description}</td>
-                      <td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
                         <button
                           onClick={() => setEditingTimesheet(t)}
                           className="btn btn-secondary btn-sm"
+                          style={{ marginRight: '0.4rem' }}
                           title="Editar esta carga de horas"
                         >
                           <Edit2 size={14} /> Editar
+                        </button>
+                        <button
+                          onClick={() => handleDeleteTimesheet(t.id)}
+                          className="btn btn-danger btn-sm"
+                          title="Eliminar este registro cargado por error"
+                        >
+                          <Trash2 size={14} /> Eliminar
                         </button>
                       </td>
                     </tr>
