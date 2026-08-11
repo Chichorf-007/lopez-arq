@@ -1,19 +1,21 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
-  DollarSign, Clock, Building2, Users, Plus, Filter, Printer, Edit2, Trash2, Search, Calendar, RefreshCw, FileText, CheckCircle2 
+  DollarSign, Clock, Building2, Users, Plus, Filter, Printer, Edit2, Trash2, Search, Calendar, RefreshCw, FileText, CheckCircle2, AlertCircle 
 } from 'lucide-react';
 import EditProyectistaModal from './EditProyectistaModal';
 import NewProjectModal from './NewProjectModal';
 import NewTimesheetModal from './NewTimesheetModal';
 import EditTimesheetModal from './EditTimesheetModal';
+import NewExpenseModal from './NewExpenseModal';
 import ReceiptModal from './ReceiptModal';
 
 export default function AdminDashboard({ token, user }) {
-  const [activeTab, setActiveTab] = useState('settlement');
+  const [activeTab, setActiveTab] = useState('settlement'); // 'settlement' | 'timesheets' | 'expenses' | 'proyectistas' | 'projects'
   
   const [timesheets, setTimesheets] = useState([]);
   const [proyectistas, setProyectistas] = useState([]);
   const [projects, setProjects] = useState([]);
+  const [expenses, setExpenses] = useState([]);
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -41,10 +43,12 @@ export default function AdminDashboard({ token, user }) {
   // Modals state
   const [editingProyectista, setEditingProyectista] = useState(null);
   const [editingTimesheet, setEditingTimesheet] = useState(null);
+  const [editingExpense, setEditingExpense] = useState(null);
   const [selectedReceipt, setSelectedReceipt] = useState(null);
   const [showNewProyectistaModal, setShowNewProyectistaModal] = useState(false);
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [showNewTimesheetModal, setShowNewTimesheetModal] = useState(false);
+  const [showNewExpenseModal, setShowNewExpenseModal] = useState(false);
 
   const formatPYG = (val) => '₲ ' + (Math.round(val || 0)).toLocaleString('es-PY');
 
@@ -84,17 +88,19 @@ export default function AdminDashboard({ token, user }) {
       if (selectedProject) queryParams.append('project_id', selectedProject);
       if (selectedProyectista) queryParams.append('user_id', selectedProyectista);
 
-      const [resTimesheets, resProyectistas, resProjects, resSummary] = await Promise.all([
+      const [resTimesheets, resProyectistas, resProjects, resSummary, resExpenses] = await Promise.all([
         fetch(`/api/timesheets?${queryParams.toString()}`, { headers }),
         fetch('/api/proyectistas', { headers }),
         fetch('/api/projects', { headers }),
-        fetch(`/api/timesheets/summary?${queryParams.toString()}`, { headers })
+        fetch(`/api/timesheets/summary?${queryParams.toString()}`, { headers }),
+        fetch('/api/expenses', { headers })
       ]);
 
       if (resTimesheets.ok) setTimesheets(await resTimesheets.json());
       if (resProyectistas.ok) setProyectistas(await resProyectistas.json());
       if (resProjects.ok) setProjects(await resProjects.json());
       if (resSummary.ok) setSummary(await resSummary.json());
+      if (resExpenses.ok) setExpenses(await resExpenses.json());
     } catch (err) {
       console.error('Error al cargar datos del dashboard:', err);
     } finally {
@@ -106,9 +112,9 @@ export default function AdminDashboard({ token, user }) {
     fetchData();
   }, [fetchData]);
 
-  // Compute Weekly Saturday Settlement per Proyectista
+  // Compute Weekly Saturday Settlement per Proyectista (Hours + Expenses)
   const weeklySettlements = useMemo(() => {
-    if (!proyectistas.length || !timesheets.length) return [];
+    if (!proyectistas.length) return [];
 
     const weekTimesheets = timesheets.filter((t) => {
       if (settlementStart && t.work_date < settlementStart) return false;
@@ -116,8 +122,15 @@ export default function AdminDashboard({ token, user }) {
       return true;
     });
 
+    const weekExpenses = expenses.filter((e) => {
+      if (settlementStart && e.expense_date < settlementStart) return false;
+      if (settlementEnd && e.expense_date > settlementEnd) return false;
+      return true;
+    });
+
     return proyectistas.map((p) => {
       const pTimesheets = weekTimesheets.filter((t) => String(t.user_id) === String(p.id));
+      const pExpenses = weekExpenses.filter((e) => String(e.user_id) === String(p.id));
       const rate = p.rate_per_hour || 0;
 
       const projMap = {};
@@ -132,7 +145,8 @@ export default function AdminDashboard({ token, user }) {
         projMap[t.project_id].hours += h;
       });
 
-      const totalCost = totalHours * rate;
+      const totalHoursCost = totalHours * rate;
+      const totalExpensesAmount = pExpenses.reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0);
 
       return {
         user_id: p.id,
@@ -140,16 +154,19 @@ export default function AdminDashboard({ token, user }) {
         user_username: p.username,
         rate_per_hour: rate,
         total_hours: totalHours,
-        total_cost: totalCost,
+        total_cost: totalHoursCost,
         projects: Object.values(projMap),
+        expenses: pExpenses,
+        total_expenses: totalExpensesAmount,
+        grand_total: totalHoursCost + totalExpensesAmount,
         period_start: settlementStart,
         period_end: settlementEnd
       };
     });
-  }, [proyectistas, timesheets, settlementStart, settlementEnd]);
+  }, [proyectistas, timesheets, expenses, settlementStart, settlementEnd]);
 
   const totalWeeklyPayroll = useMemo(() => {
-    return weeklySettlements.reduce((sum, s) => sum + s.total_cost, 0);
+    return weeklySettlements.reduce((sum, s) => sum + s.grand_total, 0);
   }, [weeklySettlements]);
 
   const handleDeleteTimesheet = async (id) => {
@@ -161,6 +178,40 @@ export default function AdminDashboard({ token, user }) {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (res.ok) fetchData();
+    } catch (err) {
+      console.error(err);
+      fetchData();
+    }
+  };
+
+  const handleDeleteExpense = async (id) => {
+    if (!window.confirm('¿Desea eliminar este registro de gasto?')) return;
+    setExpenses(prev => prev.filter(e => e.id !== id));
+    try {
+      const res = await fetch(`/api/expenses/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) fetchData();
+    } catch (err) {
+      console.error(err);
+      fetchData();
+    }
+  };
+
+  const handleToggleExpenseStatus = async (expense) => {
+    const newStatus = expense.status === 'REIMBURSED' ? 'PENDING' : 'REIMBURSED';
+    setExpenses(prev => prev.map(e => e.id === expense.id ? { ...e, status: newStatus } : e));
+    try {
+      await fetch(`/api/expenses/${expense.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ status: newStatus })
+      });
+      fetchData();
     } catch (err) {
       console.error(err);
       fetchData();
@@ -211,7 +262,7 @@ export default function AdminDashboard({ token, user }) {
             <DollarSign size={24} />
           </div>
           <div className="metric-info">
-            <span className="label">Nómina a Pagar este Sábado</span>
+            <span className="label">Total A Pagar este Sábado (Honorarios + Gastos)</span>
             <div className="value" style={{ color: 'var(--accent-gold)' }}>{formatPYG(totalWeeklyPayroll)}</div>
           </div>
         </div>
@@ -256,22 +307,28 @@ export default function AdminDashboard({ token, user }) {
           💵 Cierre Semanal de Pagos y Recibos (Sábados)
         </button>
         <button
+          className={`tab-btn ${activeTab === 'expenses' ? 'active' : ''}`}
+          onClick={() => setActiveTab('expenses')}
+        >
+          💸 Gastos de Oficina y Obras (Reembolsos)
+        </button>
+        <button
           className={`tab-btn ${activeTab === 'timesheets' ? 'active' : ''}`}
           onClick={() => setActiveTab('timesheets')}
         >
-          ⏱️ Reporte General de Horas y Horarios
+          ⏱️ Reporte General de Horas
         </button>
         <button
           className={`tab-btn ${activeTab === 'proyectistas' ? 'active' : ''}`}
           onClick={() => setActiveTab('proyectistas')}
         >
-          👥 Gestión de Proyectistas y Tarifas (₲)
+          👥 Gestión de Proyectistas
         </button>
         <button
           className={`tab-btn ${activeTab === 'projects' ? 'active' : ''}`}
           onClick={() => setActiveTab('projects')}
         >
-          🏛️ Proyectos / Obras en ejecución
+          🏛️ Proyectos / Obras
         </button>
       </div>
 
@@ -280,9 +337,9 @@ export default function AdminDashboard({ token, user }) {
         <div className="card">
           <div className="card-title no-print" style={{ flexWrap: 'wrap', gap: '1rem' }}>
             <div>
-              <h2>🗓️ Cierre de Pagos Semanales (Sábado Mediodía)</h2>
+              <h2>🗓️ Cierre de Pagos y Reembolsos Semanales (Sábado Mediodía)</h2>
               <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', margin: 0 }}>
-                Resumen de cuánto estás pagando a cada proyectista esta semana con desglose por obra y generador de recibos oficiales.
+                Resumen consolidado de honorarios por horas + reembolso de gastos para cada proyectista esta semana.
               </p>
             </div>
 
@@ -310,7 +367,7 @@ export default function AdminDashboard({ token, user }) {
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))', gap: '1.25rem', marginTop: '1rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '1.25rem', marginTop: '1rem' }}>
             {weeklySettlements.map((s) => (
               <div 
                 key={s.user_id} 
@@ -335,20 +392,44 @@ export default function AdminDashboard({ token, user }) {
                     </span>
                   </div>
 
-                  <div style={{ borderTop: '1px solid var(--border-color)', borderBottom: '1px solid var(--border-color)', padding: '0.75rem 0', margin: '0.75rem 0' }}>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase', display: 'block', marginBottom: '0.4rem' }}>
-                      Detalle de Proyectos en la Semana:
-                    </span>
+                  {/* Hours Breakdown */}
+                  <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '0.6rem', marginBottom: '0.6rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.3rem' }}>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase' }}>
+                        1. Honorarios por Horas ({s.total_hours.toFixed(1)} hs):
+                      </span>
+                      <strong style={{ fontSize: '0.9rem', color: 'var(--accent-blue)' }}>{formatPYG(s.total_cost)}</strong>
+                    </div>
                     {s.projects.length === 0 ? (
-                      <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>Sin horas registradas en esta semana.</span>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>Sin horas trabajadas.</span>
                     ) : (
-                      <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.4rem', fontSize: '0.85rem' }}>
+                      <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.8rem' }}>
                         {s.projects.map((p) => (
-                          <li key={p.project_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <span style={{ color: 'var(--text-primary)' }}>• {p.project_name}</span>
-                            <span style={{ fontWeight: 600, color: 'var(--accent-blue)' }}>
-                              {p.hours.toFixed(1)} hs ({formatPYG(p.hours * s.rate_per_hour)})
-                            </span>
+                          <li key={p.project_id} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span style={{ color: 'var(--text-muted)' }}>• {p.project_name}</span>
+                            <span>{p.hours.toFixed(1)} hs ({formatPYG(p.hours * s.rate_per_hour)})</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+
+                  {/* Expenses Breakdown */}
+                  <div style={{ borderTop: '1px solid var(--border-color)', borderBottom: '1px solid var(--border-color)', padding: '0.6rem 0', margin: '0.6rem 0' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.3rem' }}>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase' }}>
+                        2. Reembolso de Gastos ({s.expenses.length} ítems):
+                      </span>
+                      <strong style={{ fontSize: '0.9rem', color: 'var(--accent-gold)' }}>{formatPYG(s.total_expenses)}</strong>
+                    </div>
+                    {s.expenses.length === 0 ? (
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>Sin gastos registrados.</span>
+                    ) : (
+                      <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.8rem' }}>
+                        {s.expenses.map((e) => (
+                          <li key={e.id} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span style={{ color: 'var(--text-muted)' }}>• {e.category === 'PROJECT' ? e.project_name : 'Oficina'}: {e.description}</span>
+                            <span style={{ fontWeight: 600 }}>{formatPYG(e.amount)}</span>
                           </li>
                         ))}
                       </ul>
@@ -359,11 +440,11 @@ export default function AdminDashboard({ token, user }) {
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
                     <div>
-                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block' }}>TOTAL HORAS: {s.total_hours.toFixed(1)} hs</span>
-                      <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)' }}>A PAGAR EL SÁBADO:</span>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block' }}>PAGO + REEMBOLSO SÁBADO:</span>
+                      <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)' }}>TOTAL GENERAL:</span>
                     </div>
-                    <div style={{ fontSize: '1.45rem', fontWeight: 800, color: 'var(--accent-gold)', fontFamily: 'var(--font-heading)' }}>
-                      {formatPYG(s.total_cost)}
+                    <div style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--accent-gold)', fontFamily: 'var(--font-heading)' }}>
+                      {formatPYG(s.grand_total)}
                     </div>
                   </div>
 
@@ -371,7 +452,7 @@ export default function AdminDashboard({ token, user }) {
                     onClick={() => setSelectedReceipt(s)}
                     className="btn btn-primary"
                     style={{ width: '100%', fontSize: '0.85rem' }}
-                    disabled={s.total_hours === 0}
+                    disabled={s.grand_total === 0}
                   >
                     <FileText size={16} /> 🧾 Generar Recibo de Pago Imprimible
                   </button>
@@ -382,7 +463,95 @@ export default function AdminDashboard({ token, user }) {
         </div>
       )}
 
-      {/* TAB 1: General Timesheets / Horas */}
+      {/* TAB 1: GASTOS DE OFICINA Y OBRAS */}
+      {activeTab === 'expenses' && (
+        <div className="card">
+          <div className="card-title no-print">
+            <h2>💸 Registro de Gastos y Reembolsos Solicitados por Proyectistas</h2>
+            <button onClick={() => { setEditingExpense(null); setShowNewExpenseModal(true); }} className="btn btn-primary btn-sm">
+              <Plus size={16} /> Cargar Gasto
+            </button>
+          </div>
+
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', marginBottom: '1.5rem' }}>
+            Aquí puedes ver todos los gastos de compras de <strong>Oficina General</strong> u <strong>Obras Específicas</strong> realizados por los proyectistas. Puedes hacer clic en el botón de estado para marcar un gasto como <strong>Reembolsado</strong> o <strong>Pendiente</strong>.
+          </p>
+
+          <div className="table-container">
+            <table className="custom-table">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Proyectista</th>
+                  <th>Destino / Proyecto</th>
+                  <th>Monto (₲)</th>
+                  <th>Concepto / Detalle del Gasto</th>
+                  <th>Estado del Reembolso</th>
+                  <th className="no-print">Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {expenses.length === 0 ? (
+                  <tr>
+                    <td colSpan="7" style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                      No hay registros de gastos presentados.
+                    </td>
+                  </tr>
+                ) : (
+                  expenses.map((e) => (
+                    <tr key={e.id}>
+                      <td style={{ fontWeight: 600 }}>{e.expense_date}</td>
+                      <td style={{ fontWeight: 700 }}>{e.user_name}</td>
+                      <td>
+                        <span style={{
+                          padding: '0.25rem 0.65rem',
+                          borderRadius: '4px',
+                          fontWeight: 700,
+                          background: e.category === 'PROJECT' ? 'rgba(59, 130, 246, 0.15)' : 'rgba(168, 85, 247, 0.15)',
+                          color: e.category === 'PROJECT' ? 'var(--accent-blue)' : '#C084FC'
+                        }}>
+                          {e.category === 'PROJECT' ? `🏗️ ${e.project_name}` : '🏢 Oficina General'}
+                        </span>
+                      </td>
+                      <td style={{ fontWeight: 800, color: 'var(--accent-gold)', fontSize: '1.05rem' }}>
+                        {formatPYG(e.amount)}
+                      </td>
+                      <td style={{ fontSize: '0.9rem', maxWidth: '300px' }}>{e.description}</td>
+                      <td>
+                        <button
+                          onClick={() => handleToggleExpenseStatus(e)}
+                          className="btn btn-sm"
+                          style={{
+                            background: e.status === 'REIMBURSED' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(234, 179, 8, 0.15)',
+                            color: e.status === 'REIMBURSED' ? 'var(--accent-emerald)' : 'var(--accent-gold)',
+                            border: 'none',
+                            cursor: 'pointer',
+                            fontSize: '0.75rem',
+                            fontWeight: 700
+                          }}
+                          title="Haz clic para alternar entre Pendiente y Reembolsado"
+                        >
+                          {e.status === 'REIMBURSED' ? '✓ Reembolsado' : '⏳ Pendiente'}
+                        </button>
+                      </td>
+                      <td className="no-print" style={{ whiteSpace: 'nowrap' }}>
+                        <button onClick={() => { setEditingExpense(e); setShowNewExpenseModal(true); }} className="btn btn-secondary btn-sm" style={{ marginRight: '0.4rem' }}>
+                          <Edit2 size={14} />
+                        </button>
+                        <button onClick={() => handleDeleteExpense(e.id)} className="btn btn-danger btn-sm">
+                          <Trash2 size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 2: General Timesheets / Horas */}
       {activeTab === 'timesheets' && (
         <div className="card">
           <div className="card-title no-print">
@@ -407,74 +576,6 @@ export default function AdminDashboard({ token, user }) {
             </div>
           </div>
 
-          {/* Filters Bar */}
-          <div className="no-print" style={{ 
-            display: 'grid', 
-            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', 
-            gap: '1rem', 
-            marginBottom: '1.5rem',
-            background: 'var(--bg-input)',
-            padding: '1rem',
-            borderRadius: 'var(--radius-sm)',
-            border: '1px solid var(--border-color)'
-          }}>
-            <div>
-              <label className="form-label">Desde</label>
-              <input
-                type="date"
-                className="form-input"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="form-label">Hasta</label>
-              <input
-                type="date"
-                className="form-input"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="form-label">Filtrar Proyecto/Obra</label>
-              <select
-                className="form-select"
-                value={selectedProject}
-                onChange={(e) => setSelectedProject(e.target.value)}
-              >
-                <option value="">Todos los proyectos</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="form-label">Filtrar Proyectista</label>
-              <select
-                className="form-select"
-                value={selectedProyectista}
-                onChange={(e) => setSelectedProyectista(e.target.value)}
-              >
-                <option value="">Todos los proyectistas</option>
-                {proyectistas.map((u) => (
-                  <option key={u.id} value={u.id}>{u.name}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="form-label">Buscar palabra</label>
-              <input
-                type="text"
-                className="form-input"
-                placeholder="Buscar descripción..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-            </div>
-          </div>
-
-          {/* Table */}
           <div className="table-container">
             <table className="custom-table">
               <thead>
@@ -494,7 +595,7 @@ export default function AdminDashboard({ token, user }) {
                 {filteredTimesheets.length === 0 ? (
                   <tr>
                     <td colSpan="9" style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
-                      No se encontraron registros de horas para los filtros seleccionados.
+                      No se encontraron registros de horas.
                     </td>
                   </tr>
                 ) : (
@@ -510,8 +611,7 @@ export default function AdminDashboard({ token, user }) {
                             borderRadius: '6px',
                             fontWeight: 700,
                             fontSize: '0.85rem',
-                            display: 'inline-block',
-                            border: `1px solid ${dayStyle.color}40`
+                            display: 'inline-block'
                           }}>
                             📅 {formatDateWithDay(t.work_date)}
                           </span>
@@ -535,19 +635,10 @@ export default function AdminDashboard({ token, user }) {
                         <td className="currency-badge">{formatPYG(t.total_cost)}</td>
                         <td style={{ maxWidth: '280px', fontSize: '0.85rem' }}>{t.description}</td>
                         <td className="no-print" style={{ whiteSpace: 'nowrap' }}>
-                          <button
-                            onClick={() => setEditingTimesheet(t)}
-                            className="btn btn-secondary btn-sm"
-                            style={{ marginRight: '0.4rem' }}
-                            title="Editar registro"
-                          >
+                          <button onClick={() => setEditingTimesheet(t)} className="btn btn-secondary btn-sm" style={{ marginRight: '0.4rem' }}>
                             <Edit2 size={14} />
                           </button>
-                          <button
-                            onClick={() => handleDeleteTimesheet(t.id)}
-                            className="btn btn-danger btn-sm"
-                            title="Eliminar registro (Solo Admin)"
-                          >
+                          <button onClick={() => handleDeleteTimesheet(t.id)} className="btn btn-danger btn-sm">
                             <Trash2 size={14} />
                           </button>
                         </td>
@@ -561,7 +652,7 @@ export default function AdminDashboard({ token, user }) {
         </div>
       )}
 
-      {/* TAB 2: Proyectistas */}
+      {/* TAB 3: Proyectistas */}
       {activeTab === 'proyectistas' && (
         <div className="card">
           <div className="card-title">
@@ -570,10 +661,6 @@ export default function AdminDashboard({ token, user }) {
               <Plus size={16} /> Crear Proyectista
             </button>
           </div>
-
-          <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem', fontSize: '0.9rem' }}>
-            Aquí puedes editar los nombres completos y usuarios de acceso en formato <strong>nombre.apellido</strong>, definir las tarifas por hora en Guaraníes (₲) y cambiar sus contraseñas.
-          </p>
 
           <div className="table-container">
             <table className="custom-table">
@@ -600,10 +687,7 @@ export default function AdminDashboard({ token, user }) {
                       </span>
                     </td>
                     <td>
-                      <button
-                        onClick={() => setEditingProyectista(p)}
-                        className="btn btn-secondary btn-sm"
-                      >
+                      <button onClick={() => setEditingProyectista(p)} className="btn btn-secondary btn-sm">
                         <Edit2 size={14} /> Editar Nombre / Usuario / Tarifa
                       </button>
                     </td>
@@ -615,7 +699,7 @@ export default function AdminDashboard({ token, user }) {
         </div>
       )}
 
-      {/* TAB 3: Projects */}
+      {/* TAB 4: Projects */}
       {activeTab === 'projects' && (
         <div className="card">
           <div className="card-title">
@@ -731,6 +815,20 @@ export default function AdminDashboard({ token, user }) {
           onClose={() => setEditingTimesheet(null)}
           onSuccess={() => {
             setEditingTimesheet(null);
+            fetchData();
+          }}
+        />
+      )}
+
+      {showNewExpenseModal && (
+        <NewExpenseModal
+          token={token}
+          projects={projects}
+          expenseToEdit={editingExpense}
+          onClose={() => setShowNewExpenseModal(false)}
+          onSuccess={() => {
+            setShowNewExpenseModal(false);
+            setEditingExpense(null);
             fetchData();
           }}
         />

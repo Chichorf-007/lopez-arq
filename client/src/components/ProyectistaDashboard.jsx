@@ -1,11 +1,15 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Clock, Building2, Plus, Calendar, History, Edit2, Trash2, Filter, ArrowUpDown, RefreshCw } from 'lucide-react';
+import { Clock, Building2, Plus, Calendar, History, Edit2, Trash2, Filter, ArrowUpDown, RefreshCw, DollarSign, Receipt, CheckCircle, AlertCircle } from 'lucide-react';
 import NewTimesheetModal from './NewTimesheetModal';
 import EditTimesheetModal from './EditTimesheetModal';
+import NewExpenseModal from './NewExpenseModal';
 
 export default function ProyectistaDashboard({ token, user }) {
+  const [activeSubTab, setActiveSubTab] = useState('timesheets'); // 'timesheets' | 'expenses'
+  
   const [timesheets, setTimesheets] = useState([]);
   const [projects, setProjects] = useState([]);
+  const [expenses, setExpenses] = useState([]);
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -30,6 +34,10 @@ export default function ProyectistaDashboard({ token, user }) {
   // Modals state
   const [showNewTimesheetModal, setShowNewTimesheetModal] = useState(false);
   const [editingTimesheet, setEditingTimesheet] = useState(null);
+  const [showNewExpenseModal, setShowNewExpenseModal] = useState(false);
+  const [editingExpense, setEditingExpense] = useState(null);
+
+  const formatPYG = (val) => '₲ ' + (Math.round(val || 0)).toLocaleString('es-PY');
 
   const formatDateWithDay = (dateStr) => {
     if (!dateStr) return '';
@@ -65,15 +73,17 @@ export default function ProyectistaDashboard({ token, user }) {
       if (startDate) queryParams.append('start_date', startDate);
       if (endDate) queryParams.append('end_date', endDate);
 
-      const [resTimesheets, resProjects, resSummary] = await Promise.all([
+      const [resTimesheets, resProjects, resSummary, resExpenses] = await Promise.all([
         fetch('/api/timesheets', { headers }),
         fetch('/api/projects', { headers }),
-        fetch(`/api/timesheets/summary?${queryParams.toString()}`, { headers })
+        fetch(`/api/timesheets/summary?${queryParams.toString()}`, { headers }),
+        fetch('/api/expenses', { headers })
       ]);
 
       if (resTimesheets.ok) setTimesheets(await resTimesheets.json());
       if (resProjects.ok) setProjects(await resProjects.json());
       if (resSummary.ok) setSummary(await resSummary.json());
+      if (resExpenses.ok) setExpenses(await resExpenses.json());
     } catch (err) {
       console.error('Error al cargar datos del proyectista:', err);
     } finally {
@@ -86,10 +96,25 @@ export default function ProyectistaDashboard({ token, user }) {
   }, [startDate, endDate]);
 
   const handleDeleteTimesheet = async (id) => {
-    if (!window.confirm('¿Desea eliminar este registro de horas cargado por error?')) return;
+    if (!window.confirm('¿Desea eliminar este registro de horas?')) return;
     setTimesheets(prev => prev.filter(t => t.id !== id));
     try {
       const res = await fetch(`/api/timesheets/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) fetchData();
+    } catch (err) {
+      console.error(err);
+      fetchData();
+    }
+  };
+
+  const handleDeleteExpense = async (id) => {
+    if (!window.confirm('¿Desea eliminar este registro de gasto?')) return;
+    setExpenses(prev => prev.filter(e => e.id !== id));
+    try {
+      const res = await fetch(`/api/expenses/${id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -108,13 +133,21 @@ export default function ProyectistaDashboard({ token, user }) {
     });
   }, [timesheets, startDate, endDate]);
 
+  const filteredExpensesByDate = useMemo(() => {
+    return expenses.filter((e) => {
+      if (startDate && e.expense_date < startDate) return false;
+      if (endDate && e.expense_date > endDate) return false;
+      return true;
+    });
+  }, [expenses, startDate, endDate]);
+
   const periodTotalHours = useMemo(() => {
     return filteredTimesheetsByDate.reduce((sum, t) => sum + (parseFloat(t.hours) || 0), 0);
   }, [filteredTimesheetsByDate]);
 
-  const lifetimeTotalHours = useMemo(() => {
-    return timesheets.reduce((sum, t) => sum + (parseFloat(t.hours) || 0), 0);
-  }, [timesheets]);
+  const periodTotalExpenses = useMemo(() => {
+    return filteredExpensesByDate.reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0);
+  }, [filteredExpensesByDate]);
 
   const processedTimesheets = useMemo(() => {
     return filteredTimesheetsByDate
@@ -158,13 +191,18 @@ export default function ProyectistaDashboard({ token, user }) {
         <div>
           <h1 style={{ fontSize: '1.75rem' }}>Hola, {user.name} 👋</h1>
           <p style={{ color: 'var(--text-secondary)' }}>
-            Registra tus horas trabajadas indicando la hora de inicio y fin para cada proyecto.
+            Registra tus horas trabajadas y tus gastos de oficina u obras para solicitar reembolso.
           </p>
         </div>
 
-        <button onClick={() => setShowNewTimesheetModal(true)} className="btn btn-primary">
-          <Plus size={18} /> Cargar Nuevas Horas
-        </button>
+        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <button onClick={() => setShowNewTimesheetModal(true)} className="btn btn-primary">
+            <Plus size={18} /> Cargar Horas
+          </button>
+          <button onClick={() => { setEditingExpense(null); setShowNewExpenseModal(true); }} className="btn btn-secondary" style={{ background: 'rgba(234, 179, 8, 0.15)', color: 'var(--accent-gold)', border: '1px solid rgba(234, 179, 8, 0.3)' }}>
+            <DollarSign size={18} /> 💸 Cargar Gasto / Reembolso
+          </button>
+        </div>
       </div>
 
       {/* Metric Cards */}
@@ -174,38 +212,38 @@ export default function ProyectistaDashboard({ token, user }) {
             <Clock size={24} />
           </div>
           <div className="metric-info">
-            <span className="label">Horas en el Período Seleccionado</span>
+            <span className="label">Horas en el Período</span>
             <div className="value" style={{ color: 'var(--accent-blue)' }}>{periodTotalHours.toFixed(1)} hs</div>
           </div>
         </div>
 
-        <div className="metric-card">
+        <div className="metric-card" style={{ borderLeftColor: 'var(--accent-gold)' }}>
           <div className="metric-icon" style={{ color: 'var(--accent-gold)' }}>
-            <Building2 size={24} />
+            <DollarSign size={24} />
           </div>
           <div className="metric-info">
-            <span className="label">Proyectos Trabajados/Visitadas</span>
-            <div className="value">{summary?.by_project?.length || 0}</div>
+            <span className="label">Gastos / Reembolsos en el Período</span>
+            <div className="value" style={{ color: 'var(--accent-gold)' }}>{formatPYG(periodTotalExpenses)}</div>
           </div>
         </div>
 
         <div className="metric-card">
           <div className="metric-icon" style={{ color: 'var(--accent-emerald)' }}>
-            <History size={24} />
+            <Building2 size={24} />
           </div>
           <div className="metric-info">
-            <span className="label">Total Horas Histórico</span>
-            <div className="value">{lifetimeTotalHours.toFixed(1)} hs</div>
+            <span className="label">Proyectos Trabajados</span>
+            <div className="value">{summary?.by_project?.length || 0}</div>
           </div>
         </div>
       </div>
 
-      {/* Date Range Selector Bar for Proyectista */}
+      {/* Date Range Selector Bar */}
       <div className="card" style={{ marginBottom: '1.5rem', padding: '1rem 1.5rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
             <Calendar size={18} style={{ color: 'var(--accent-gold)' }} />
-            <strong style={{ fontSize: '0.95rem', color: 'var(--text-primary)' }}>Filtrar Horas por Semana / Fecha:</strong>
+            <strong style={{ fontSize: '0.95rem', color: 'var(--text-primary)' }}>Filtrar por Semana / Fecha:</strong>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
@@ -251,178 +289,250 @@ export default function ProyectistaDashboard({ token, user }) {
         </div>
       </div>
 
-      {/* Grid: Hours per Project + Personal Timesheet History */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
-        {/* Acumulado por Obra / Proyecto */}
-        <div className="card">
-          <div className="card-title">
-            <h3>🏗️ Horas Acumuladas por Proyecto</h3>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            {summary?.by_project?.length === 0 ? (
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>Aún no has registrado horas en ningún proyecto en este período.</p>
-            ) : (
-              summary?.by_project?.map((p) => (
-                <div key={p.project_id} style={{
-                  background: 'var(--bg-input)',
-                  padding: '1rem',
-                  borderRadius: 'var(--radius-sm)',
-                  border: '1px solid var(--border-color)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between'
-                }}>
-                  <div>
-                    <span style={{ fontWeight: 700, fontSize: '0.95rem', display: 'block' }}>{p.project_name}</span>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Horas en el período seleccionado</span>
-                  </div>
-                  <div style={{
-                    fontFamily: 'var(--font-heading)',
-                    fontSize: '1.3rem',
-                    fontWeight: 700,
-                    color: 'var(--accent-blue)',
-                    background: 'rgba(59, 130, 246, 0.1)',
-                    padding: '0.2rem 0.75rem',
-                    borderRadius: 'var(--radius-full)'
-                  }}>
-                    {p.hours.toFixed(1)} hs
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* Carga Rápida Info */}
-        <div className="card" style={{ background: 'linear-gradient(135deg, rgba(21,28,44,1) 0%, rgba(15,23,42,1) 100%)' }}>
-          <div className="card-title">
-            <h3>ℹ️ Control Obligatorio de Horarios</h3>
-          </div>
-          <ul style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', paddingLeft: '1.2rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            <li>Es obligatorio indicar la <strong>Hora de Inicio</strong> y <strong>Hora de fin de tu proyecto</strong> (ej: 13:00 a 15:00 hs).</li>
-            <li>Si cargaste mal una hora, puedes modificarla con el botón ✏️ <strong>Editar</strong> o borrarla con 🗑️ <strong>Eliminar</strong>.</li>
-          </ul>
-        </div>
+      {/* Tabs Switcher: Horas vs Gastos */}
+      <div className="tabs-header" style={{ marginBottom: '1.5rem' }}>
+        <button
+          className={`tab-btn ${activeSubTab === 'timesheets' ? 'active' : ''}`}
+          onClick={() => setActiveSubTab('timesheets')}
+        >
+          ⏱️ Mi Historial de Horas
+        </button>
+        <button
+          className={`tab-btn ${activeSubTab === 'expenses' ? 'active' : ''}`}
+          onClick={() => setActiveSubTab('expenses')}
+        >
+          💸 Mis Gastos y Reembolsos (Oficina u Obras)
+        </button>
       </div>
 
-      {/* Historial Detallado */}
-      <div className="card">
-        <div className="card-title" style={{ flexWrap: 'wrap', gap: '1rem' }}>
-          <h2>📋 Mi Historial de Registros</h2>
-
-          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <Filter size={16} style={{ color: 'var(--text-muted)' }} />
-              <select
-                className="form-select"
-                style={{ padding: '0.4rem 0.75rem', fontSize: '0.85rem' }}
-                value={selectedProjectFilter}
-                onChange={(e) => setSelectedProjectFilter(e.target.value)}
-              >
-                <option value="">Todos los Proyectos</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
+      {/* SECTION 1: TIMESHEETS TAB */}
+      {activeSubTab === 'timesheets' && (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
+            <div className="card">
+              <div className="card-title">
+                <h3>🏗️ Horas Acumuladas por Proyecto</h3>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                {summary?.by_project?.length === 0 ? (
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>Sin horas registradas en este período.</p>
+                ) : (
+                  summary?.by_project?.map((p) => (
+                    <div key={p.project_id} style={{
+                      background: 'var(--bg-input)',
+                      padding: '1rem',
+                      borderRadius: 'var(--radius-sm)',
+                      border: '1px solid var(--border-color)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between'
+                    }}>
+                      <div>
+                        <span style={{ fontWeight: 700, fontSize: '0.95rem', display: 'block' }}>{p.project_name}</span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Horas en el período seleccionado</span>
+                      </div>
+                      <div style={{
+                        fontFamily: 'var(--font-heading)',
+                        fontSize: '1.3rem',
+                        fontWeight: 700,
+                        color: 'var(--accent-blue)',
+                        background: 'rgba(59, 130, 246, 0.1)',
+                        padding: '0.2rem 0.75rem',
+                        borderRadius: 'var(--radius-full)'
+                      }}>
+                        {p.hours.toFixed(1)} hs
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <ArrowUpDown size={16} style={{ color: 'var(--text-muted)' }} />
-              <select
-                className="form-select"
-                style={{ padding: '0.4rem 0.75rem', fontSize: '0.85rem' }}
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-              >
-                <option value="date_desc">Orden: Más Recientes Primero</option>
-                <option value="date_asc">Orden: Más Antiguos Primero</option>
-                <option value="project">Ordenar por Nombre de Proyecto</option>
-              </select>
+            <div className="card" style={{ background: 'linear-gradient(135deg, rgba(21,28,44,1) 0%, rgba(15,23,42,1) 100%)' }}>
+              <div className="card-title">
+                <h3>ℹ️ Control de Horas & Gastos</h3>
+              </div>
+              <ul style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', paddingLeft: '1.2rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                <li>Indica <strong>Hora de Inicio</strong> y <strong>Hora de Fin</strong> al registrar tus trabajos.</li>
+                <li>Si hiciste un gasto personal para la oficina o una obra (planos, papelería, combustible), cárgalo en <strong>"💸 Cargar Gasto"</strong>.</li>
+                <li>Maru te devolverá los gastos aprobados junto con tu pago el día **Sábado**.</li>
+              </ul>
             </div>
           </div>
-        </div>
 
-        <div className="table-container">
-          <table className="custom-table">
-            <thead>
-              <tr>
-                <th style={{ width: '180px' }}>Día / Fecha</th>
-                <th>Obra / Proyecto</th>
-                <th>Horario Trabajado</th>
-                <th>Total Horas</th>
-                <th>Descripción del Trabajo Realizado</th>
-                <th>Acciones</th>
-              </tr>
-            </thead>
-            <tbody>
-              {processedTimesheets.length === 0 ? (
-                <tr>
-                  <td colSpan="6" style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
-                    No se encontraron registros para las fechas o proyecto seleccionados.
-                  </td>
-                </tr>
-              ) : (
-                processedTimesheets.map((t) => {
-                  const badge = getDayBadge(t.work_date);
-                  return (
-                    <tr key={t.id} style={{ borderLeft: `3px solid ${badge.color}` }}>
-                      <td>
-                        <span style={{
-                          background: badge.bg,
-                          color: badge.color,
-                          border: `1px solid ${badge.border}`,
-                          padding: '0.35rem 0.75rem',
-                          borderRadius: '6px',
-                          fontWeight: 700,
-                          fontSize: '0.85rem',
-                          display: 'inline-block',
-                          boxShadow: '0 2px 5px rgba(0,0,0,0.2)'
-                        }}>
-                          📅 {formatDateWithDay(t.work_date)}
-                        </span>
+          <div className="card">
+            <div className="card-title" style={{ flexWrap: 'wrap', gap: '1rem' }}>
+              <h2>📋 Mi Historial de Registros de Horas</h2>
+              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <Filter size={16} style={{ color: 'var(--text-muted)' }} />
+                  <select
+                    className="form-select"
+                    style={{ padding: '0.4rem 0.75rem', fontSize: '0.85rem' }}
+                    value={selectedProjectFilter}
+                    onChange={(e) => setSelectedProjectFilter(e.target.value)}
+                  >
+                    <option value="">Todos los Proyectos</option>
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div className="table-container">
+              <table className="custom-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: '180px' }}>Día / Fecha</th>
+                    <th>Obra / Proyecto</th>
+                    <th>Horario Trabajado</th>
+                    <th>Total Horas</th>
+                    <th>Descripción del Trabajo Realizado</th>
+                    <th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {processedTimesheets.length === 0 ? (
+                    <tr>
+                      <td colSpan="6" style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                        No se encontraron registros para las fechas seleccionadas.
                       </td>
+                    </tr>
+                  ) : (
+                    processedTimesheets.map((t) => {
+                      const badge = getDayBadge(t.work_date);
+                      return (
+                        <tr key={t.id} style={{ borderLeft: `3px solid ${badge.color}` }}>
+                          <td>
+                            <span style={{
+                              background: badge.bg,
+                              color: badge.color,
+                              border: `1px solid ${badge.border}`,
+                              padding: '0.35rem 0.75rem',
+                              borderRadius: '6px',
+                              fontWeight: 700,
+                              fontSize: '0.85rem',
+                              display: 'inline-block'
+                            }}>
+                              📅 {formatDateWithDay(t.work_date)}
+                            </span>
+                          </td>
+                          <td>
+                            <span style={{
+                              background: 'rgba(255,255,255,0.08)',
+                              padding: '0.25rem 0.65rem',
+                              borderRadius: '4px',
+                              fontWeight: 700,
+                              color: 'var(--text-primary)'
+                            }}>
+                              {t.project_name}
+                            </span>
+                          </td>
+                          <td style={{ fontWeight: 600, color: 'var(--accent-gold)' }}>
+                            🕒 {t.start_time || '08:00'} a {t.end_time || '12:00'} hs
+                          </td>
+                          <td style={{ fontWeight: 700, color: 'var(--accent-blue)', fontSize: '1rem' }}>{t.hours} hs</td>
+                          <td style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>{t.description}</td>
+                          <td style={{ whiteSpace: 'nowrap' }}>
+                            <button onClick={() => setEditingTimesheet(t)} className="btn btn-secondary btn-sm" style={{ marginRight: '0.4rem' }}>
+                              <Edit2 size={14} /> Editar
+                            </button>
+                            <button onClick={() => handleDeleteTimesheet(t.id)} className="btn btn-danger btn-sm">
+                              <Trash2 size={14} /> Eliminar
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* SECTION 2: EXPENSES TAB */}
+      {activeSubTab === 'expenses' && (
+        <div className="card">
+          <div className="card-title">
+            <h2>💸 Mis Gastos y Reembolsos Solicitados</h2>
+            <button onClick={() => { setEditingExpense(null); setShowNewExpenseModal(true); }} className="btn btn-primary btn-sm">
+              <Plus size={16} /> Cargar Gasto
+            </button>
+          </div>
+
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', marginBottom: '1.5rem' }}>
+            Aquí puedes registrar las compras o insumos abonados con tu dinero para la <strong>Oficina</strong> o para <strong>Obras</strong>. Al realizar el cierre de nómina del Sábado, Maru te los devolverá junto a tu pago.
+          </p>
+
+          <div className="table-container">
+            <table className="custom-table">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Destino / Proyecto</th>
+                  <th>Monto Solicitado (₲)</th>
+                  <th>Concepto / Detalle del Gasto</th>
+                  <th>Estado Reembolso</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredExpensesByDate.length === 0 ? (
+                  <tr>
+                    <td colSpan="6" style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                      No tienes gastos o reembolsos registrados en este período.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredExpensesByDate.map((e) => (
+                    <tr key={e.id}>
+                      <td style={{ fontWeight: 600 }}>{e.expense_date}</td>
                       <td>
                         <span style={{
-                          background: 'rgba(255,255,255,0.08)',
                           padding: '0.25rem 0.65rem',
                           borderRadius: '4px',
                           fontWeight: 700,
-                          letterSpacing: '0.02em',
-                          color: 'var(--text-primary)'
+                          background: e.category === 'PROJECT' ? 'rgba(59, 130, 246, 0.15)' : 'rgba(168, 85, 247, 0.15)',
+                          color: e.category === 'PROJECT' ? 'var(--accent-blue)' : '#C084FC'
                         }}>
-                          {t.project_name}
+                          {e.category === 'PROJECT' ? `🏗️ ${e.project_name}` : '🏢 Oficina General'}
                         </span>
                       </td>
-                      <td style={{ fontWeight: 600, color: 'var(--accent-gold)' }}>
-                        🕒 {t.start_time || '08:00'} a {t.end_time || '12:00'} hs
+                      <td style={{ fontWeight: 800, color: 'var(--accent-gold)', fontSize: '1.05rem' }}>
+                        {formatPYG(e.amount)}
                       </td>
-                      <td style={{ fontWeight: 700, color: 'var(--accent-blue)', fontSize: '1rem' }}>{t.hours} hs</td>
-                      <td style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>{t.description}</td>
+                      <td style={{ fontSize: '0.9rem' }}>{e.description}</td>
+                      <td>
+                        {e.status === 'REIMBURSED' ? (
+                          <span style={{ background: 'rgba(16, 185, 129, 0.15)', color: 'var(--accent-emerald)', padding: '0.25rem 0.65rem', borderRadius: 'var(--radius-full)', fontSize: '0.75rem', fontWeight: 700 }}>
+                            ✓ Reembolsado
+                          </span>
+                        ) : (
+                          <span style={{ background: 'rgba(234, 179, 8, 0.15)', color: 'var(--accent-gold)', padding: '0.25rem 0.65rem', borderRadius: 'var(--radius-full)', fontSize: '0.75rem', fontWeight: 700 }}>
+                            ⏳ Pendiente Sábado
+                          </span>
+                        )}
+                      </td>
                       <td style={{ whiteSpace: 'nowrap' }}>
-                        <button
-                          onClick={() => setEditingTimesheet(t)}
-                          className="btn btn-secondary btn-sm"
-                          style={{ marginRight: '0.4rem' }}
-                          title="Editar esta carga de horas"
-                        >
+                        <button onClick={() => { setEditingExpense(e); setShowNewExpenseModal(true); }} className="btn btn-secondary btn-sm" style={{ marginRight: '0.4rem' }}>
                           <Edit2 size={14} /> Editar
                         </button>
-                        <button
-                          onClick={() => handleDeleteTimesheet(t.id)}
-                          className="btn btn-danger btn-sm"
-                          title="Eliminar este registro cargado por error"
-                        >
+                        <button onClick={() => handleDeleteExpense(e.id)} className="btn btn-danger btn-sm">
                           <Trash2 size={14} /> Eliminar
                         </button>
                       </td>
                     </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Modals */}
       {showNewTimesheetModal && (
@@ -446,6 +556,20 @@ export default function ProyectistaDashboard({ token, user }) {
           onClose={() => setEditingTimesheet(null)}
           onSuccess={() => {
             setEditingTimesheet(null);
+            fetchData();
+          }}
+        />
+      )}
+
+      {showNewExpenseModal && (
+        <NewExpenseModal
+          token={token}
+          projects={projects}
+          expenseToEdit={editingExpense}
+          onClose={() => setShowNewExpenseModal(false)}
+          onSuccess={() => {
+            setShowNewExpenseModal(false);
+            setEditingExpense(null);
             fetchData();
           }}
         />

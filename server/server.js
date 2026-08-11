@@ -7,6 +7,7 @@ const authRoutes = require('./routes/auth');
 const proyectistaRoutes = require('./routes/proyectistas');
 const projectRoutes = require('./routes/projects');
 const timesheetRoutes = require('./routes/timesheets');
+const expenseRoutes = require('./routes/expenses');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -20,6 +21,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/proyectistas', proyectistaRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/timesheets', timesheetRoutes);
+app.use('/api/expenses', expenseRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
