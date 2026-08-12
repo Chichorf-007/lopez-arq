@@ -51,8 +51,8 @@ router.get('/', authenticateToken, async (req, res) => {
 
     const { data: rows, error } = await query;
     if (error) {
-      // Gracefully handle if table doesn't exist yet in schema cache
-      if (error.code === 'PGRST301' || error.message.includes('expenses')) {
+      if (error.code === '42P01' || error.message?.includes('expenses')) {
+        console.warn('⚠️ La tabla "expenses" no existe aún en Supabase public schema.');
         return res.json([]);
       }
       throw error;
@@ -75,7 +75,7 @@ router.get('/', authenticateToken, async (req, res) => {
     res.json(sanitizedRows);
   } catch (err) {
     console.error('Error en GET /expenses:', err);
-    res.status(500).json({ error: 'Error al obtener gastos' });
+    res.status(500).json({ error: err.message || 'Error al obtener gastos' });
   }
 });
 
@@ -98,7 +98,7 @@ router.post('/', authenticateToken, async (req, res) => {
       expense_date,
       amount: parsedAmount,
       category: category === 'PROJECT' ? 'PROJECT' : 'OFFICE',
-      project_id: category === 'PROJECT' ? (project_id || null) : null,
+      project_id: category === 'PROJECT' ? (project_id ? parseInt(project_id) : null) : null,
       description: description.trim(),
       status: 'PENDING'
     };
@@ -113,12 +113,17 @@ router.post('/', authenticateToken, async (req, res) => {
 
     res.status(201).json({ message: 'Gasto registrado exitosamente', expense: inserted });
   } catch (err) {
-    console.error('Error en POST /expenses:', err);
-    res.status(500).json({ error: 'Error al registrar el gasto. Asegúrate de haber ejecutado la tabla "expenses" en Supabase.' });
+    console.error('Error detallado en POST /expenses:', err);
+    if (err.code === '42P01' || err.message?.includes('expenses')) {
+      return res.status(400).json({ 
+        error: 'La tabla "expenses" aún no está creada en Supabase. En el SQL Editor de Supabase, ejecuta el comando de creación de la tabla "expenses" con sus permisos (GRANT ALL).' 
+      });
+    }
+    res.status(500).json({ error: err.message || 'Error al registrar el gasto' });
   }
 });
 
-// PUT /api/expenses/:id - Edit expense or change status
+// PUT /api/expenses/:id - Edit expense
 router.put('/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
@@ -142,7 +147,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
       expense_date: expense_date || existing.expense_date,
       amount: amount ? parseFloat(amount) : existing.amount,
       category: category ? (category === 'PROJECT' ? 'PROJECT' : 'OFFICE') : existing.category,
-      project_id: category ? (category === 'PROJECT' ? (project_id || null) : null) : existing.project_id,
+      project_id: category ? (category === 'PROJECT' ? (project_id ? parseInt(project_id) : null) : null) : existing.project_id,
       description: description !== undefined ? description.trim() : existing.description
     };
 
@@ -156,7 +161,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
     res.json({ message: 'Gasto actualizado correctamente' });
   } catch (err) {
     console.error('Error en PUT /expenses:', err);
-    res.status(500).json({ error: 'Error al actualizar el gasto' });
+    res.status(500).json({ error: err.message || 'Error al actualizar el gasto' });
   }
 });
 
@@ -185,7 +190,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     res.json({ message: 'Gasto eliminado correctamente' });
   } catch (err) {
     console.error('Error en DELETE /expenses:', err);
-    res.status(500).json({ error: 'Error al eliminar el gasto' });
+    res.status(500).json({ error: err.message || 'Error al eliminar el gasto' });
   }
 });
 
