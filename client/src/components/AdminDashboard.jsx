@@ -20,16 +20,24 @@ export default function AdminDashboard({ token, user }) {
   const [loading, setLoading] = useState(true);
 
   // Weekly Saturday settlement date range (Default: Monday to Saturday of current week)
-  const getWeekRange = () => {
-    const d = new Date();
-    const day = d.getDay();
-    const diffToMon = d.getDate() - day + (day === 0 ? -6 : 1);
-    const mon = new Date(d.setDate(diffToMon)).toISOString().split('T')[0];
-    const sat = new Date(d.setDate(diffToMon + 5)).toISOString().split('T')[0];
-    return { mon, sat };
+  const getWeekRange = (offsetWeeks = 0) => {
+    const today = new Date();
+    const day = today.getDay();
+    const diffToMon = today.getDate() - day + (day === 0 ? -6 : 1) + (offsetWeeks * 7);
+    
+    const mon = new Date(today);
+    mon.setDate(diffToMon);
+    
+    const sat = new Date(today);
+    sat.setDate(diffToMon + 5);
+    
+    return {
+      mon: mon.toISOString().split('T')[0],
+      sat: sat.toISOString().split('T')[0]
+    };
   };
 
-  const initialWeek = getWeekRange();
+  const initialWeek = getWeekRange(0);
   const [settlementStart, setSettlementStart] = useState(initialWeek.mon);
   const [settlementEnd, setSettlementEnd] = useState(initialWeek.sat);
 
@@ -159,8 +167,8 @@ export default function AdminDashboard({ token, user }) {
         expenses: pExpenses,
         total_expenses: totalExpensesAmount,
         grand_total: totalHoursCost + totalExpensesAmount,
-        period_start: settlementStart,
-        period_end: settlementEnd
+        period_start: settlementStart || 'Histórico',
+        period_end: settlementEnd || 'Histórico'
       };
     });
   }, [proyectistas, timesheets, expenses, settlementStart, settlementEnd]);
@@ -168,6 +176,23 @@ export default function AdminDashboard({ token, user }) {
   const totalWeeklyPayroll = useMemo(() => {
     return weeklySettlements.reduce((sum, s) => sum + s.grand_total, 0);
   }, [weeklySettlements]);
+
+  const handleSetSettlementThisWeek = () => {
+    const range = getWeekRange(0);
+    setSettlementStart(range.mon);
+    setSettlementEnd(range.sat);
+  };
+
+  const handleSetSettlementLastWeek = () => {
+    const range = getWeekRange(-1);
+    setSettlementStart(range.mon);
+    setSettlementEnd(range.sat);
+  };
+
+  const handleSetSettlementAllTime = () => {
+    setSettlementStart('');
+    setSettlementEnd('');
+  };
 
   const handleDeleteTimesheet = async (id) => {
     if (!window.confirm('¿Desea eliminar este registro de horas?')) return;
@@ -339,13 +364,14 @@ export default function AdminDashboard({ token, user }) {
             <div>
               <h2>🗓️ Cierre de Pagos y Reembolsos Semanales (Sábado Mediodía)</h2>
               <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', margin: 0 }}>
-                Resumen consolidado de honorarios por horas + reembolso de gastos para cada proyectista esta semana.
+                Resumen consolidado de honorarios por horas + reembolso de gastos para cada proyectista.
               </p>
             </div>
 
-            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', background: 'var(--bg-input)', padding: '0.5rem 1rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }}>
-              <div>
-                <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block' }}>Desde (Lunes)</label>
+            {/* Date Filters & Presets for Maru */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center', background: 'var(--bg-input)', padding: '0.6rem 1rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Desde:</span>
                 <input
                   type="date"
                   className="form-input"
@@ -354,8 +380,8 @@ export default function AdminDashboard({ token, user }) {
                   onChange={(e) => setSettlementStart(e.target.value)}
                 />
               </div>
-              <div>
-                <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block' }}>Hasta (Sábado)</label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Hasta:</span>
                 <input
                   type="date"
                   className="form-input"
@@ -363,6 +389,31 @@ export default function AdminDashboard({ token, user }) {
                   value={settlementEnd}
                   onChange={(e) => setSettlementEnd(e.target.value)}
                 />
+              </div>
+
+              {/* Quick Presets */}
+              <div style={{ display: 'flex', gap: '0.4rem' }}>
+                <button 
+                  onClick={handleSetSettlementThisWeek} 
+                  className="btn btn-secondary btn-sm"
+                  style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem' }}
+                >
+                  Esta Semana
+                </button>
+                <button 
+                  onClick={handleSetSettlementLastWeek} 
+                  className="btn btn-secondary btn-sm"
+                  style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem' }}
+                >
+                  Semana Pasada
+                </button>
+                <button 
+                  onClick={handleSetSettlementAllTime} 
+                  className="btn btn-secondary btn-sm"
+                  style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem', background: 'rgba(234, 179, 8, 0.15)', color: 'var(--accent-gold)' }}
+                >
+                  Ver Todo el Histórico
+                </button>
               </div>
             </div>
           </div>
@@ -401,7 +452,7 @@ export default function AdminDashboard({ token, user }) {
                       <strong style={{ fontSize: '0.9rem', color: 'var(--accent-blue)' }}>{formatPYG(s.total_cost)}</strong>
                     </div>
                     {s.projects.length === 0 ? (
-                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>Sin horas trabajadas.</span>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>Sin horas registradas en el período.</span>
                     ) : (
                       <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.8rem' }}>
                         {s.projects.map((p) => (
@@ -423,7 +474,7 @@ export default function AdminDashboard({ token, user }) {
                       <strong style={{ fontSize: '0.9rem', color: 'var(--accent-gold)' }}>{formatPYG(s.total_expenses)}</strong>
                     </div>
                     {s.expenses.length === 0 ? (
-                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>Sin gastos registrados.</span>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>Sin gastos registrados en el período.</span>
                     ) : (
                       <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.8rem' }}>
                         {s.expenses.map((e) => (
@@ -440,7 +491,7 @@ export default function AdminDashboard({ token, user }) {
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
                     <div>
-                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block' }}>PAGO + REEMBOLSO SÁBADO:</span>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block' }}>PAGO + REEMBOLSO:</span>
                       <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-secondary)' }}>TOTAL GENERAL:</span>
                     </div>
                     <div style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--accent-gold)', fontFamily: 'var(--font-heading)' }}>
